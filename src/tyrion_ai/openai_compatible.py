@@ -51,166 +51,168 @@ class OpenAICompatibleProvider:
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream a chat completion response."""
         return self._stream(model, system, messages, tools)
-async def _stream(
-        self,
-        model: str,
-        system :str,
-        messages :list[AgentMessage],
-        tools :list[AgentTool],
-) -> AsyncIterator[AssistantMessageEvent]:
-    # 1. Build the request payload
-    payload = self._build_payload(model, system, messages, tools)
+    async def _stream(
+            self,
+            model: str,
+            system :str,
+            messages :list[AgentMessage],
+            tools :list[AgentTool],
+    ) -> AsyncIterator[AssistantMessageEvent]:
+        # 1. Build the request payload
+        payload = self._build_payload(model, system, messages, tools)
 
-    # 2. Make the streaming HTTP request
-    try:
-        async with self._client.stream(
-            "POST",
-            "/chat/compeltions",
-            json=payload,
-        ) as response:
-            if response.status_code != 200:
-                body = await response.aread()
-                error_msg = f"API error {response.status_code} : {body.decode()}"
-                yield AssistantMessageEvent(
-                    error = AssistantMessage(
-                        model = model,
-                        content = [],
-                        stop_reason= "error",
-                        error_message = error_msg,
-                    )
-                )
-                return
-            async for event in self.parse_sse_stream(response, model):
-                yield event
-
-    except httpx.HTTPError as exc:
-        yield AssistantErrorEvent(
-            error = AssistantMessage(
-                model = model,
-                content = [],
-                stop_reason= "error",
-                error_message=f"HTTP error: {exc}",
-            )
-        )
-
-## Converting our types into OpenAI JSON format
-
-def _build_payload(
-        self,
-        model:str,
-        system :str,
-        messages :list[AgentMessage],
-        tools :list[AgentTool],
-) -> dict[str, Any]:
-    """Build the OpenAI chat completions request body."""
-    openai_messages : list[dict[str, Any]] = []
-
-    # System Prompt
-    openai_messages.append({"role" : "system", "content" : system})
-
-    # Convert each transcript message to OpenAI format
-    for msg in messages:
-        if isinstance(msg, UserMessage):
-            openai_messages.append({
-                "role" : "user",
-                "content" : msg.content,
-            })
-        elif isinstance(msg, AssistantMessage):
-            openai_msg :dict[str, Any] = {
-                "role" :"assistant",
-                "content" : msg.text or None,
-            }
-            # Add tools if present
-            if msg.tool_calls:
-                openai_msg["tool_calls"] = [
-                    {
-                        "id" :tc.id,
-                        "type" : "function",
-                        "function": {
-                            "name" :tc.name,
-                            "argumetns" : json.dumps(tc.arguments),
-                        }
-                    }
-                    for tc in msg.tool_calls
-                ]
-            openai_messages.append(openai_msg)
-        elif isinstance(msg, ToolResultMessage):
-            openai_messages.append({
-                "role" : "tool",
-                "tool_call_id": msg.tool_call_id,
-                "content" :msg.text,
-            })
-    payload : dict[str, Any] ={
-        "model" :model,
-        "messages" :openai_messages,
-        "stream" :True,
-    }
-
-    if tools:
-        payload["tools"] = [
-            {
-                "type":"function",
-                "function" :{
-                    "name" : tool.name,
-                    "description" : tool.description,
-                    "parameters" : dict(tool.parameters),
-                }
-            }
-            for tool in tools
-        ]
-    return payload
-
-
-## SSE Stream parsing
-
-async def _parse_sse_stream(
-        self,
-        response: httpx.Response,
-        model : str,
-) -> AsyncIterator[AssistantMessageEvent]:
-    """Parse OpenAI's Server-Sent Events stream into Tyrion events."""
-
-    # We build up the message as the chunks arrive
-    text_so_far = ""
-    tool_calls_so_far : dict[int, dict[str, Any]] = {}
-    started = False
-
-    async for line in response.aiter_lines():
-        # SSE Format: each chunk is "data: {json}\n\n"
-        if not line.startswith("data: "):
-            continue
-        data = line[6:]
-
-        if data == "[DONE]":
-            break
-
+        # 2. Make the streaming HTTP request
         try:
-            chunk = json.loads(data)
-        except json.JSONDecodeError:
-            continue
+            async with self._client.stream(
+                "POST",
+                "/chat/completions",
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    error_msg = f"API error {response.status_code} : {body.decode()}"
+                    yield AssistantErrorEvent(
+                        error = AssistantMessage(
+                            model = model,
+                            content = [],
+                            stop_reason= "error",
+                            error_message = error_msg,
+                        )
+                    )
+                    return
+                async for event in self._parse_sse_stream(response, model):
+                    yield event
 
-        #Extract the delta from the chunk
-        choices = chunk.get("choices", [])
-        if not choices:
-            continue
+        except httpx.HTTPError as exc:
+            yield AssistantErrorEvent(
+                error = AssistantMessage(
+                    model = model,
+                    content = [],
+                    stop_reason= "error",
+                    error_message=f"HTTP error: {exc}",
+                )
+            )
 
-        choice = choices[0]
-        delta = choice.get("delta", {})
-        finish_reason = choice.get("finish_reason")
+    ## Converting our types into OpenAI JSON format
 
-        # --- Build the partial message for events ---
-        if "content" in delta and delta["content"]:
-            text_so_far += delta["content"]
+    def _build_payload(
+            self,
+            model:str,
+            system :str,
+            messages :list[AgentMessage],
+            tools :list[AgentTool],
+    ) -> dict[str, Any]:
+        """Build the OpenAI chat completions request body."""
+        openai_messages : list[dict[str, Any]] = []
 
-            partial = self._build_partial(model, text_so_far, tool_calls_so_far)
+        # System Prompt
+        openai_messages.append({"role" : "system", "content" : system})
+        # Convert each transcript message to OpenAI format
+        for msg in messages:
+            if isinstance(msg, UserMessage):
+                openai_messages.append({
+                    "role" : "user",
+                    "content" : msg.content,
+                })
+            elif isinstance(msg, AssistantMessage):
+                openai_msg :dict[str, Any] = {
+                    "role" :"assistant",
+                    "content" : msg.text or None,
+                }
+                # Add tools if present
+                if msg.tool_calls:
+                    openai_msg["tool_calls"] = [
+                        {
+                            "id" :tc.id,
+                            "type" : "function",
+                            "function": {
+                                "name" :tc.name,
+                                "arguments" : json.dumps(tc.arguments),
+                            }
+                        }
+                        for tc in msg.tool_calls
+                    ]
+                openai_messages.append(openai_msg)
+            elif isinstance(msg, ToolResultMessage):
+                openai_messages.append({
+                    "role" : "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content" :msg.text,
+                })
+        payload : dict[str, Any] ={
+            "model" :model,
+            "messages" :openai_messages,
+            "stream" :True,
+        }
 
-            if not started:
-                started = True
-                yield AssistantStartEvent(partial = partial)
+        if tools:
+             
+            payload["tool_choice"] = "auto"
+            payload["tools"] = [
+                {
+                    "type":"function",
+                    "function" :{
+                        "name" : tool.name,
+                        "description" : tool.description,
+                        "parameters" : dict(tool.parameters),
+                    }
+                }
+                for tool in tools
+            ]
+        return payload
 
-            yield TextDeltaEvent(delta= delta["content"], partial = partial)
 
-            # Tool call deltas
+    ## SSE Stream parsing
+    partial = None
+
+    async def _parse_sse_stream(
+            self,
+            response: httpx.Response,
+            model : str,
+    ) -> AsyncIterator[AssistantMessageEvent]:
+        """Parse OpenAI's Server-Sent Events stream into Tyrion events."""
+
+        # We build up the message as the chunks arrive
+        text_so_far = ""
+        tool_calls_so_far : dict[int, dict[str, Any]] = {}
+        started = False
+
+        async for line in response.aiter_lines():
+            # SSE Format: each chunk is "data: {json}\n\n"
+            if not line.startswith("data: "):
+                continue
+            data = line[6:]
+
+            if data == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+            #Extract the delta from the chunk
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+
+            choice = choices[0]
+            delta = choice.get("delta", {})
+            finish_reason = choice.get("finish_reason")
+
+            # --- Build the partial message for events ---
+            if "content" in delta and delta["content"]:
+                text_so_far += delta["content"]
+
+                partial = self._build_partial(model, text_so_far, tool_calls_so_far)
+
+                if not started:
+                    started = True
+                    yield AssistantStartEvent(partial = partial)
+
+                yield TextDeltaEvent(delta= delta["content"], partial = partial)
+
+                # Tool call deltas
             if "tool_calls" in delta:
                 for tc_delta in delta["tool_calls"]:
                     index = tc_delta["index"]
@@ -258,7 +260,7 @@ async def _parse_sse_stream(
                     yield AssistantStartEvent(partial=partial)
 
                 for tc_data in tool_calls_so_far.values():
-                    args = self._safe_parse_argumets(tc_data["arguments"])
+                    args = self._safe_parse_arguments(tc_data["arguments"])
                     yield ToolCallEndEvent(
                         tool_call=ToolCall(
                             id = tc_data["id"],
@@ -301,7 +303,6 @@ async def _parse_sse_stream(
                 arguments = args
             ))
         return AssistantMessage(model = model, content = content)
-
     def _build_final(
             self,
             model: str,
@@ -320,7 +321,7 @@ async def _parse_sse_stream(
                 name=tc_data["name"],
                 arguments=args,
             ))
-        stop_reason = "tooluse" if tool_calls else "stop"
+        stop_reason = "toolUse" if tool_calls else "stop"
         return AssistantMessage(
             model=model,
             content = content,

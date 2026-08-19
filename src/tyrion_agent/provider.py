@@ -25,9 +25,8 @@ class ModelProvider(Protocol):
             model: str,
             system: str,
             messages: list[AgentMessage],
-            tools: list[AgentMessage],
+            tools: list[AgentTool],
             signal: CancellationToken | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream one model response as assistant message events."""
         ...
-        

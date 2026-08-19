@@ -37,9 +37,9 @@ class FakeProvider:
         # Record what was called.
         self.calls.append((model, system, list(messages), list(tools)))
 
-        # Pop the mext scripted stream
+        # Pop the next scripted stream
 
-        stream = self._streams.pop(0) if self._streams else []
+        stream = self.streams.pop(0) if self._streams else []
 
         async def iterator() -> AsyncIterator[AssistantMessageEvent]:
             for event in stream:

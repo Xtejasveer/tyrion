@@ -53,7 +53,7 @@ class UserMessage(WireModel):
 
 class AssistantMessage(WireModel):
     """A message from the assistant, containing text and/or tool calls."""
-    role: Literal["assisant"] = "assisant"
+    role: Literal["assistant"] = "assistant"
     content: list[TextContent | ThinkingContent| ToolCall] = Field(default_factory=list)
     model: str = "unknown"
     usage: dict[str,int] = Field(default_factory=dict)
@@ -68,7 +68,7 @@ class AssistantMessage(WireModel):
         if not isinstance(value, dict):
             return value
         data = dict(value)
-        content = data.get(content)
+        content = data.get("content")
         if isinstance(content,str):
             data["content"] = [TextContent(text=content).model_dump()] if content else []
         return data

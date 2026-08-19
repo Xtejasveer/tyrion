@@ -1,4 +1,4 @@
-"""Shared low-level types for Tyrion's protable agent layer."""
+"""Shared low-level types for Tyrion's portable agent layer."""
 
 from __future__ import annotations
 

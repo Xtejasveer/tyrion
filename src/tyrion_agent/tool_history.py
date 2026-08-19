@@ -31,7 +31,7 @@ def repair_tool_history(
     This function appends synthetic error results for any orphaned
     tool calls so the provider gets a valid transcript.
     """
-    result: list[AgentMessage] = list[messages]
+    result: list[AgentMessage] = list(messages)
 
     returned_ids: set[str] = {
         msg.tool_call_id

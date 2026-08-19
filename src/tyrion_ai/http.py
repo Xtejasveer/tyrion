@@ -14,7 +14,7 @@ def create_http_client(
     return httpx.AsyncClient(
         base_url= base_url,
         headers = {
-            "Authorizations" : f"Bearer {api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type" : "application/json",
         },
         timeout = httpx.Timeout(timeout_seconds, connect= 10.0)
