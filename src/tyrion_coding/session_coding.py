@@ -53,11 +53,11 @@ class SessionManager:
             metas.append(
                 SessionMeta(
                     session_id=state.session_id or path.stem,
-                    path = Path,
+                    path = path,
                     name = state.name,
                     model = state.model,
                     created_at=created_at,
                     message_count=len(state.messages),
                 )
             )
-            return metas
+        return metas
