@@ -39,7 +39,7 @@ class FakeProvider:
 
         # Pop the next scripted stream
 
-        stream = self.streams.pop(0) if self._streams else []
+        stream = self.streams.pop(0) if self.streams else []
 
         async def iterator() -> AsyncIterator[AssistantMessageEvent]:
             for event in stream:
