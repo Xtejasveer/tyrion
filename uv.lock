@@ -299,6 +299,31 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-aio"
+version = "2.1.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ba/38/9aab892a064592dde69b68554550a7f773d9120d5cbd77c9c033a91bba71/pytest_aio-2.1.7.tar.gz", hash = "sha256:c9c2fa05787a48cc6abf90f57d2333dc4fe356a1b49db7bcb52ec32ada8bb684", size = 5509, upload-time = "2026-02-12T15:58:50.899Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/39/a9a065eaf0336041225443e79ecbaa27146c241514782990480a70df0ac0/pytest_aio-2.1.7-py3-none-any.whl", hash = "sha256:72eca30834d254d3f36336295a19119b42900c84bdd8155a0c242467987d0e73", size = 6577, upload-time = "2026-02-12T15:58:51.524Z" },
+]
+
+[[package]]
+name = "pytest-asyncio"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42", size = 58514, upload-time = "2026-05-26T09:56:04.083Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1", size = 16930, upload-time = "2026-05-26T09:56:02.576Z" },
+]
+
+[[package]]
 name = "rich"
 version = "15.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -408,6 +433,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "pygments" },
     { name = "pytest" },
+    { name = "pytest-aio" },
+    { name = "pytest-asyncio" },
     { name = "rich" },
     { name = "ruff" },
     { name = "textual" },
@@ -421,6 +448,8 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pygments", specifier = ">=2.18" },
     { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-aio", specifier = ">=2.1.7" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", specifier = ">=0.5" },
     { name = "textual", specifier = ">=8.0" },

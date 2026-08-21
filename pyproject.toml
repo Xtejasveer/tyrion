@@ -15,6 +15,8 @@ dependencies = [
     "pydantic>=2.11",
     "pygments>=2.18",
     "pytest>=8.0",
+    "pytest-aio>=2.1.7",
+    "pytest-asyncio>=1.4.0",
     "rich>=13.0",
     "ruff>=0.5",
     "textual>=8.0",
@@ -24,3 +26,6 @@ dependencies = [
 tyrion = "tyrion_coding.cli:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tyrion_ai", "src/tyrion_agent", "src/tyrion_coding"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
