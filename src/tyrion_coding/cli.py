@@ -7,8 +7,7 @@ import os
 import sys
 import typer
 
-from tyrion_ai.env import openai_compatible_config_from_env
-from tyrion_ai.openai_compatible import OpenAICompatibleProvider
+from tyrion_coding.provider_config import get_provider_for_model
 from tyrion_coding.rendering import PrintRenderer
 from tyrion_coding.session import CodingSession
 from tyrion_coding.session_coding import SessionManager
@@ -65,12 +64,11 @@ async def _run_agent(
     resume: str | None,
 ) -> None:
     try:
-        config = openai_compatible_config_from_env()
+        provider, _, _ = get_provider_for_model(model)
     except ValueError as exc:
         print(f"Error: {exc}")
         raise typer.Exit(1)
 
-    provider = OpenAICompatibleProvider(config)
     cwd = os.getcwd()
     manager = SessionManager()
 
@@ -116,12 +114,11 @@ def _run_tui(
     resume: str | None,
 ) -> None:
     try:
-        config = openai_compatible_config_from_env()
+        provider, _, _ = get_provider_for_model(model)
     except ValueError as exc:
         print(f"Error: {exc}")
         raise typer.Exit(1)
 
-    provider = OpenAICompatibleProvider(config)
     cwd = os.getcwd()
     manager = SessionManager()
 

@@ -31,7 +31,7 @@ class SessionPickerModal(ModalScreen[str | None]):
             text-style: bold;
         }
         OptionList {
-            border: sunken $primary-darken-3;
+            border: solid $primary-darken-3;
             height: 1fr;
         }
         #picker-footer {
@@ -67,7 +67,7 @@ class SessionPickerModal(ModalScreen[str | None]):
                 f"Messages: {meta.message_count} |"
                 f"Date: {created_str}"
             )
-            option_list.app_option(Option(prompt_line, id=meta.session_id))
+            option_list.add_option(Option(prompt_line, id=meta.session_id))
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle selecting an option."""

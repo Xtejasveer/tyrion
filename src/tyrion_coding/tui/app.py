@@ -190,11 +190,18 @@ class TyrionApp(App[None]):
             manager = SessionManager()
             storage = manager.storage_for(session_id)
 
+            # We read the first state to determine what model was used in this session
+            state = storage.read_state()
+            target_model = state.model or self.session.harness.config.model
+
+            from tyrion_coding.provider_config import get_provider_for_model
+            provider, _, _ = get_provider_for_model(target_model)
+
             from tyrion_coding.session import CodingSession
             session = CodingSession(
                 cwd=self.session.cwd,
-                provider=self.session.harness.config.provider,
-                model=self.session.harness.config.model,
+                provider=provider,
+                model=target_model,
                 system=None,
                 storage=storage,
                 session_id=session_id,
@@ -205,6 +212,7 @@ class TyrionApp(App[None]):
             await self.session.resume()
 
             self.status_bar.session_id = session_id
+            self.status_bar.model = target_model
             self.status_bar._update_status()
 
             from tyrion_agent.messages import (
