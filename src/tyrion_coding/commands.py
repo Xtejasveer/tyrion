@@ -85,7 +85,7 @@ async def handle_model(app: TyrionApp, args: list[str]) -> None:
             
             # Update TUI status bar visual
             app.status_bar.model = new_model
-            app.status_bar._update_status()
+            app.update_token_display()
             
             msg_widget = MessageWidget(
                 role="system",
@@ -109,6 +109,47 @@ async def handle_resume(app: TyrionApp, args: list[str]) -> None:
         app.run_resume_worker(session_id)
 
 
+async def handle_compact(app: TyrionApp, args: list[str]) -> None:
+    """Manually trigger compaction."""
+    from tyrion_coding.tui.widgets import MessageWidget
+    
+    if len(app.session.harness.messages) <= 6:
+        msg_widget = MessageWidget(
+            role="system",
+            content="⚠️ Not enough messages to compact (requires at least 7 messages)."
+        )
+        await app.transcript_view.mount(msg_widget)
+        app.transcript_view.scroll_end()
+        return
+        
+    msg_widget = MessageWidget(
+        role="system",
+        content="🧹 [bold yellow]Manually compacting context...[/bold yellow]"
+    )
+    await app.transcript_view.mount(msg_widget)
+    app.transcript_view.scroll_end()
+    app.status_bar.set_status("Compacting")
+    
+    try:
+        await app.session.compact()
+        await app.clear_transcript()
+        await app.init_session()
+        
+        success_widget = MessageWidget(
+            role="system",
+            content="✅ [bold green]Compaction complete![/bold green]"
+        )
+        await app.transcript_view.mount(success_widget)
+    except Exception as exc:
+        error_widget = MessageWidget(
+            role="system",
+            content=f"❌ [bold red]Compaction failed:[/bold red] {exc}"
+        )
+        await app.transcript_view.mount(error_widget)
+        
+    app.transcript_view.scroll_end()
+
+
 # Register defaults
 registry.register(SlashCommand("/help", "List available commands", handle_help))
 registry.register(SlashCommand("/clear", "Clear chat transcript history", handle_clear))
@@ -116,3 +157,4 @@ registry.register(SlashCommand("/quit", "Exit the TUI", handle_quit))
 registry.register(SlashCommand("/exit", "Exit the TUI", handle_quit))
 registry.register(SlashCommand("/model", "Switch LLM model, e.g. `/model gpt-4o`", handle_model))
 registry.register(SlashCommand("/resume", "Show previous session selector modal", handle_resume))
+registry.register(SlashCommand("/compact", "Manually compress and summarize past conversation history", handle_compact))

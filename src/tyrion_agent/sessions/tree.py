@@ -7,32 +7,35 @@ from dataclasses import dataclass, field
 
 from tyrion_agent.messages import AgentMessage
 from tyrion_agent.sessions.entries import (
+    CompactionEntry,
     LeafEntry,
     MessageEntry,
     ModelChangeEntry,
-    SessionInfoEntry,
     SessionEntry,
+    SessionInfoEntry,
 )
+
 
 @dataclass(slots=True)
 class SessionState:
     """Rebuilt view of one branch of a session."""
 
-    session_id : str | None = None
+    session_id: str | None = None
     name: str | None = None
-    cwd : str | None = None
+    cwd: str | None = None
     model: str | None = None
-    leaf_id : str | None = None
-    entries : list[SessionEntry] = field(default_factory=list)
-    messages : list[AgentMessage] = field(default_factory=list)
+    leaf_id: str | None = None
+    entries: list[SessionEntry] = field(default_factory=list)
+    messages: list[AgentMessage] = field(default_factory=list)
+
 
 def index_entries(entries: Sequence[SessionEntry]) -> dict[str, SessionEntry]:
     return {entry.id: entry for entry in entries}
 
+
 def find_leaf_id(entries: Sequence[SessionEntry]) -> str | None:
     """Latest LeafEntry wins; otherwise the last entry in the file."""
-
-    leaf_id : str | None = None
+    leaf_id: str | None = None
     for entry in entries:
         if isinstance(entry, LeafEntry) and entry.parent_id is not None:
             leaf_id = entry.parent_id
@@ -42,16 +45,16 @@ def find_leaf_id(entries: Sequence[SessionEntry]) -> str | None:
         return entries[-1].id
     return None
 
+
 def reconstruct_path(
-        entries :Sequence[SessionEntry],
-        *,
-        leaf_id: str |None = None,
+    entries: Sequence[SessionEntry],
+    *,
+    leaf_id: str | None = None,
 ) -> list[SessionEntry]:
     """Walk parent pointers from a leaf back to the root, then reverse"""
-
     by_id = index_entries(entries)
     current_id = leaf_id if leaf_id is not None else find_leaf_id(entries)
-    path : list[SessionEntry] =[]
+    path: list[SessionEntry] = []
     seen: set[str] = set()
 
     while current_id is not None and current_id not in seen:
@@ -64,14 +67,17 @@ def reconstruct_path(
     path.reverse()
     return path
 
+
 def reconstruct_state(
-        entries: Sequence[SessionEntry],
-        *,
-        leaf_id: str |None = None,
+    entries: Sequence[SessionEntry],
+    *,
+    leaf_id: str | None = None,
 ) -> SessionState:
     """Build SessionState for one branch."""
     path = reconstruct_path(entries, leaf_id=leaf_id)
-    state = SessionState(entries=list(path), leaf_id=path[-1].id if path else None)
+    state = SessionState(
+        entries=list(path), leaf_id=path[-1].id if path else None
+    )
 
     for entry in path:
         if isinstance(entry, SessionInfoEntry):
@@ -86,6 +92,17 @@ def reconstruct_state(
             state.model = entry.model
         elif isinstance(entry, MessageEntry):
             state.messages.append(entry.message)
+        elif isinstance(entry, CompactionEntry):
+            from tyrion_agent.messages import UserMessage
+
+            state.messages.append(
+                UserMessage(
+                    content=(
+                        "System Notification: The preceding conversation history "
+                        "has been compacted. Summary of past events:\n\n"
+                        f"{entry.summary}"
+                    )
+                )
+            )
 
     return state
-    

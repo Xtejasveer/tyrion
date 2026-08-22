@@ -37,17 +37,17 @@ class PromptInput(TextArea):
             self.insert("\n")
             event.prevent_default()
         elif event.key == "tab":
-            #Tab completion for commands
+            # Tab completion for commands
             text = self.text
             if text.startswith("/"):
                 event.prevent_default()
                 parts = text.split(maxsplit=1)
                 cmd_prefix = parts[0]
-                rest = parts[1] if len(parts) >1 else ""
+                rest = parts[1] if len(parts) > 1 else ""
 
                 from tyrion_coding.commands import registry
-                all_cmd_names =[cmd.name for cmd in registry.commands]
-
+                all_cmd_names = [cmd.name for cmd in registry.commands]
+                
                 matches = [name for name in all_cmd_names if name.startswith(cmd_prefix)]
                 if matches:
                     try:
@@ -55,7 +55,7 @@ class PromptInput(TextArea):
                         next_match = matches[(idx + 1) % len(matches)]
                     except ValueError:
                         next_match = matches[0]
-
+                    
                     new_text = next_match
                     if rest:
                         new_text += " " + rest
@@ -72,6 +72,8 @@ class TUIStatusBar(Static):
         self.model = model
         self.cwd = cwd
         self.status_text = "Idle"
+        self.current_tokens = 0
+        self.token_limit = 0
         self._update_status()
 
     def set_status(self, text: str) -> None:
@@ -79,11 +81,22 @@ class TUIStatusBar(Static):
         self.status_text = text
         self._update_status()
 
+    def set_tokens(self, current: int, limit: int) -> None:
+        """Update the estimated token usage count and limit."""
+        self.current_tokens = current
+        self.token_limit = limit
+        self._update_status()
+
     def _update_status(self) -> None:
+        tokens_str = (
+            f"{self.current_tokens / 1000:.1f}K / {self.token_limit / 1000:.1f}K"
+            if self.token_limit
+            else "N/A"
+        )
         self.update(
             f"💻 [bold]Tyrion[/bold] | Session: [cyan]{self.session_id}[/cyan] | "
-            f"Model: [green]{self.model}[/green] | Cwd: [yellow]{self.cwd}[/yellow] | "
-            f"Status: {self.status_text}"
+            f"Model: [green]{self.model}[/green] | Tokens: [magenta]{tokens_str}[/magenta] | "
+            f"Cwd: [yellow]{self.cwd}[/yellow] | Status: {self.status_text}"
         )
 
 

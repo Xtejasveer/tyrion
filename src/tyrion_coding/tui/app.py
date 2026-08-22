@@ -136,6 +136,7 @@ class TyrionApp(App[None]):
 
             self.transcript_view.scroll_end()
             self.status_bar.set_status("Idle")
+            self.update_token_display()
         except Exception as e:
             self.status_bar.set_status("Error")
             self.notify(f"Failed to load session: {e}", severity="error")
@@ -180,6 +181,20 @@ class TyrionApp(App[None]):
         for child in list(self.transcript_view.children):
             await child.remove()
 
+    def update_token_display(self) -> None:
+        """Recalculate current session tokens and update status bar."""
+        from tyrion_ai.model_limits import get_context_window
+        from tyrion_coding.context_window import estimate_session_tokens
+
+        system_prompt = self.session.harness.config.system
+        messages = list(self.session.harness.messages)
+        model = self.session.harness.config.model
+
+        tokens = estimate_session_tokens(system_prompt, messages)
+        limit = get_context_window(model)
+
+        self.status_bar.set_tokens(tokens, limit)
+
     @work
     async def run_resume_worker(self, session_id: str) -> None:
         """Resumes a past session and reloads the transcript history."""
@@ -190,7 +205,6 @@ class TyrionApp(App[None]):
             manager = SessionManager()
             storage = manager.storage_for(session_id)
 
-            # We read the first state to determine what model was used in this session
             state = storage.read_state()
             target_model = state.model or self.session.harness.config.model
 
@@ -256,6 +270,7 @@ class TyrionApp(App[None]):
 
             self.transcript_view.scroll_end()
             self.status_bar.set_status("Idle")
+            self.update_token_display()
             self.notify(f"Resumed session {session_id[:8]}...")
         except Exception as e:
             self.status_bar.set_status("Error")
@@ -264,6 +279,30 @@ class TyrionApp(App[None]):
     @work(exclusive=True)
     async def run_agent_loop_worker(self, prompt_text: str) -> None:
         """Runs the harness prompt loop inside a background worker."""
+        # 1. Check for automatic compaction threshold
+        if self.session.needs_compaction():
+            await self.transcript_view.mount(
+                MessageWidget(
+                    "system",
+                    "🧹 [bold yellow]Context size near limit. Starting automatic compaction...[/bold yellow]"
+                )
+            )
+            self.transcript_view.scroll_end()
+            self.status_bar.set_status("Compacting")
+            try:
+                await self.session.compact()
+                await self.clear_transcript()
+                await self.init_session()
+                await self.transcript_view.mount(
+                    MessageWidget(
+                        "system",
+                        "✅ [bold green]Context compaction complete![/bold green]"
+                    )
+                )
+                self.transcript_view.scroll_end()
+            except Exception as exc:
+                self.notify(f"Automatic compaction failed: {exc}", severity="error")
+
         self.status_bar.set_status("Running")
         self.thinking_indicator.visible = True
 
@@ -271,6 +310,7 @@ class TyrionApp(App[None]):
         user_widget = MessageWidget("user", prompt_text)
         await self.transcript_view.mount(user_widget)
         self.transcript_view.scroll_end()
+        self.update_token_display()
 
         assistant_widget: MessageWidget | None = None
         current_tool_widget: ToolCallWidget | None = None
@@ -334,4 +374,5 @@ class TyrionApp(App[None]):
         finally:
             self.thinking_indicator.visible = False
             self.status_bar.set_status("Idle")
+            self.update_token_display()
             self.prompt_input.focus()

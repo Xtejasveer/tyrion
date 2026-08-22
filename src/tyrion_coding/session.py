@@ -45,7 +45,9 @@ class CodingSession:
         self._initialized = False
         self._system_override = system
 
-        resolved_tools = tools if tools is not None else create_coding_tools(self.cwd)
+        resolved_tools = (
+            tools if tools is not None else create_coding_tools(self.cwd)
+        )
         resolved_system = (
             system
             if system is not None
@@ -65,7 +67,6 @@ class CodingSession:
 
     def refresh_system_prompt(self) -> None:
         """Rebuild the system prompt from the current project files."""
-
         if self._system_override is not None:
             self.harness.config.system = self._system_override
             return
@@ -76,7 +77,6 @@ class CodingSession:
 
     async def start(self) -> None:
         """Create a root SessionInfoEntry, or load an existing file."""
-
         if self._initialized:
             return
 
@@ -105,7 +105,6 @@ class CodingSession:
 
     async def resume(self) -> None:
         """Load JSONL into the harness. Call this for --resume"""
-
         entries = await self.storage.read_all()
         state = reconstruct_state(entries)
         self.session_id = state.session_id or self.session_id
@@ -135,3 +134,89 @@ class CodingSession:
         )
         await self.storage.append(entry)
         self._parent_id = entry.id
+
+    def needs_compaction(self, threshold: float = 0.80) -> bool:
+        """Check if the session token count exceeds the threshold fraction of context window."""
+        from tyrion_ai.model_limits import get_context_window
+        from tyrion_coding.context_window import estimate_session_tokens
+
+        system_prompt = self.harness.config.system
+        messages = list(self.harness.messages)
+        model = self.harness.config.model
+
+        current_tokens = estimate_session_tokens(system_prompt, messages)
+        limit = get_context_window(model)
+
+        return current_tokens >= (threshold * limit)
+
+    async def compact(self) -> None:
+        """Compact the oldest part of the transcript by asking the model to summarize it."""
+        messages = list(self.harness.messages)
+
+        # Require at least 7 messages to run compaction (keeps last 6, summarizes rest)
+        if len(messages) <= 6:
+            return
+
+        to_summarize = messages[:-6]
+
+        # Serialize history for summary prompt
+        history_lines = []
+        for msg in to_summarize:
+            role = (
+                "User"
+                if msg.role == "user"
+                else (
+                    "Assistant" if msg.role == "assistant" else "Tool Result"
+                )
+            )
+            content = getattr(msg, "content", "") or getattr(msg, "text", "")
+            if isinstance(content, list):
+                content = getattr(msg, "text", "")
+            history_lines.append(f"[{role}]: {content}")
+        history_text = "\n".join(history_lines)
+
+        from tyrion_agent.messages import UserMessage
+
+        summary_prompt = [
+            UserMessage(
+                content=(
+                    "Please provide a concise but thorough summary of the following conversation history, "
+                    "focusing on what the user asked, what tools were executed, what code was written/edited, "
+                    "and what was accomplished. Your summary will be used as context for continuing this session.\n\n"
+                    f"Conversation History to Summarize:\n{history_text}"
+                )
+            )
+        ]
+
+        summary_text = ""
+        # Invoke backing provider directly to stream the summary
+        async for event in self.harness.config.provider.stream_response(
+            model=self.harness.config.model,
+            system="You are a helpful assistant. Summarize the conversation history clearly.",
+            messages=summary_prompt,
+            tools=[],
+        ):
+            from tyrion_agent.provider_events import TextDeltaEvent
+
+            if isinstance(event, TextDeltaEvent):
+                summary_text += event.delta
+
+        summary_text = summary_text.strip()
+        if not summary_text:
+            summary_text = "Compacted history summary."
+
+        # Append CompactionEntry log node
+        from tyrion_agent.sessions.entries import CompactionEntry
+
+        compaction_entry = CompactionEntry(
+            id=_new_id(),
+            parent_id=self._parent_id,
+            summary=summary_text,
+            replaced_entry_ids=[],
+        )
+
+        await self.storage.append(compaction_entry)
+        self._parent_id = compaction_entry.id
+
+        # Reload session path from storage files
+        await self.resume()
