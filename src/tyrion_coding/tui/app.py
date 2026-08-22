@@ -13,6 +13,7 @@ from tyrion_agent.events import (
     ToolExecutionStartEvent,
 )
 from tyrion_agent.messages import AssistantMessage
+from tyrion_coding.session_coding import SessionManager
 from tyrion_coding.tui.widgets import (
     MessageWidget,
     PromptInput,
@@ -147,11 +148,110 @@ class TyrionApp(App[None]):
 
     async def on_prompt_input_submitted(self, event: PromptInput.Submitted) -> None:
         """Triggered when the user submits a prompt."""
+        text = event.text.strip()
+        if text.startswith("/"):
+            # Intercept and run slash commands
+            parts = text.split()
+            cmd_name = parts[0]
+            args = parts[1:]
+            
+            from tyrion_coding.commands import registry
+            cmd = registry.get(cmd_name)
+            if cmd is not None:
+                await cmd.handler(self, args)
+            else:
+                await self.transcript_view.mount(
+                    MessageWidget(
+                        role="system",
+                        content=f"❌ Unknown command: [bold]{cmd_name}[/bold]. Type `/help` for a list of commands."
+                    )
+                )
+                self.transcript_view.scroll_end()
+            return
+
         if self.session.harness.is_running:
             self.notify("An agent run is already in progress!", severity="error")
             return
 
-        self.run_agent_loop_worker(event.text)
+        self.run_agent_loop_worker(text)
+
+    async def clear_transcript(self) -> None:
+        """Clear all messages from the transcript view."""
+        for child in list(self.transcript_view.children):
+            await child.remove()
+
+    @work
+    async def run_resume_worker(self, session_id: str) -> None:
+        """Resumes a past session and reloads the transcript history."""
+        self.status_bar.set_status("Resuming...")
+        await self.clear_transcript()
+
+        try:
+            manager = SessionManager()
+            storage = manager.storage_for(session_id)
+
+            from tyrion_coding.session import CodingSession
+            session = CodingSession(
+                cwd=self.session.cwd,
+                provider=self.session.harness.config.provider,
+                model=self.session.harness.config.model,
+                system=None,
+                storage=storage,
+                session_id=session_id,
+                max_turns=self.session.harness.config.max_turns,
+            )
+            self.session = session
+
+            await self.session.resume()
+
+            self.status_bar.session_id = session_id
+            self.status_bar._update_status()
+
+            from tyrion_agent.messages import (
+                AssistantMessage,
+                ToolResultMessage,
+                UserMessage,
+            )
+
+            messages = self.session.harness.messages
+            i = 0
+            while i < len(messages):
+                msg = messages[i]
+                if isinstance(msg, UserMessage):
+                    await self.transcript_view.mount(
+                        MessageWidget("user", msg.content)
+                    )
+                elif isinstance(msg, AssistantMessage):
+                    if msg.text:
+                        await self.transcript_view.mount(
+                            MessageWidget("assistant", msg.text)
+                        )
+                    for tool_call in msg.tool_calls:
+                        tool_result_msg = None
+                        for j in range(i + 1, len(messages)):
+                            if (
+                                isinstance(messages[j], ToolResultMessage)
+                                and messages[j].tool_call_id == tool_call.id
+                            ):
+                                tool_result_msg = messages[j]
+                                break
+
+                        tool_widget = ToolCallWidget(
+                            tool_call.name, tool_call.arguments
+                        )
+                        if tool_result_msg is not None:
+                            tool_widget.set_result(
+                                tool_result_msg.text, tool_result_msg.is_error
+                            )
+                        await self.transcript_view.mount(tool_widget)
+                i += 1
+
+            self.transcript_view.scroll_end()
+            self.status_bar.set_status("Idle")
+            self.notify(f"Resumed session {session_id[:8]}...")
+        except Exception as e:
+            self.status_bar.set_status("Error")
+            self.notify(f"Failed to resume session: {e}", severity="error")
 
     @work(exclusive=True)
     async def run_agent_loop_worker(self, prompt_text: str) -> None:

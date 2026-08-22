@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class PromptInput(TextArea):
-    """Multi-line prompt input with submit on Enter."""
+    """Multi-line prompt input with submit on Enter and Tab completion."""
 
     class Submitted(Message):
         """Event fired when user submits a prompt."""
@@ -36,6 +36,31 @@ class PromptInput(TextArea):
             # Allow shift+enter to input a real newline character
             self.insert("\n")
             event.prevent_default()
+        elif event.key == "tab":
+            #Tab completion for commands
+            text = self.text
+            if text.startswith("/"):
+                event.prevent_default()
+                parts = text.split(maxsplit=1)
+                cmd_prefix = parts[0]
+                rest = parts[1] if len(parts) >1 else ""
+
+                from tyrion_coding.commands import registry
+                all_cmd_names =[cmd.name for cmd in registry.commands]
+
+                matches = [name for name in all_cmd_names if name.startswith(cmd_prefix)]
+                if matches:
+                    try:
+                        idx = matches.index(cmd_prefix)
+                        next_match = matches[(idx + 1) % len(matches)]
+                    except ValueError:
+                        next_match = matches[0]
+
+                    new_text = next_match
+                    if rest:
+                        new_text += " " + rest
+                    self.text = new_text
+                    self.move_cursor((0, len(new_text)))
 
 
 class TUIStatusBar(Static):
