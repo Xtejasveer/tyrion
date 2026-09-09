@@ -83,6 +83,7 @@ async def handle_model(app: TyrionApp, args: list[str]) -> None:
             app.session.harness.config.model = new_model
 
             app.status_bar.model = new_model
+            app.prompt_box.set_model(new_model)
             app.update_token_display()
 
             msg_widget = MessageWidget(

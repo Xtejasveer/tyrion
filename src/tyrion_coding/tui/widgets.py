@@ -4,8 +4,10 @@ from typing import TYPE_CHECKING
 from rich.markdown import Markdown
 from rich.panel import Panel
 from textual import events
+from textual.app import ComposeResult
+from textual.containers import Vertical
 from textual.message import Message
-from textual.widgets import Static, TextArea
+from textual.widgets import Label, Static, TextArea
 
 if TYPE_CHECKING:
     from tyrion_agent.types import JSONValue
@@ -47,7 +49,7 @@ class PromptInput(TextArea):
 
                 from tyrion_coding.commands import registry
                 all_cmd_names = [cmd.name for cmd in registry.commands]
-                
+
                 matches = [name for name in all_cmd_names if name.startswith(cmd_prefix)]
                 if matches:
                     try:
@@ -55,12 +57,41 @@ class PromptInput(TextArea):
                         next_match = matches[(idx + 1) % len(matches)]
                     except ValueError:
                         next_match = matches[0]
-                    
+
                     new_text = next_match
                     if rest:
                         new_text += " " + rest
                     self.text = new_text
                     self.move_cursor((0, len(new_text)))
+
+
+class PromptBox(Vertical):
+    """Compound prompt box with input area and bottom model pill."""
+
+    def __init__(self, model_name: str = "gpt-4.1-mini", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.model_name = model_name
+
+    def compose(self) -> ComposeResult:
+        yield PromptInput(
+            placeholder='Ask anything... "Fix a TODO in the codebase"',
+            id="prompt-input",
+        )
+        yield Label(
+            f"[bold #3b82f6]Build[/] [dim]·[/] [bold white]{self.model_name}[/] [dim]Tyrion[/]",
+            id="prompt-model-pill",
+        )
+
+    def set_model(self, model_name: str) -> None:
+        """Update model name shown in the bottom pill."""
+        self.model_name = model_name
+        try:
+            pill = self.query_one("#prompt-model-pill", Label)
+            pill.update(
+                f"[bold #3b82f6]Build[/] [dim]·[/] [bold white]{model_name}[/] [dim]Tyrion[/]"
+            )
+        except Exception:
+            pass
 
 
 class TUIStatusBar(Static):

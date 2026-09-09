@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import VerticalScroll
-from textual.widgets import Header
+from textual.containers import Vertical, VerticalScroll
 
 from tyrion_agent.events import (
     MessageEndEvent,
@@ -14,8 +13,10 @@ from tyrion_agent.events import (
 )
 from tyrion_agent.messages import AssistantMessage
 from tyrion_coding.session_coding import SessionManager
+from tyrion_coding.tui.welcome import WelcomeHeader, WelcomeHints, WelcomeTip
 from tyrion_coding.tui.widgets import (
     MessageWidget,
+    PromptBox,
     PromptInput,
     ThinkingIndicator,
     ToolCallWidget,
@@ -30,23 +31,66 @@ class TyrionApp(App[None]):
     """Tyrion Interactive Terminal User Interface."""
 
     CSS = """
-    TyrionApp {
-        background: $background;
+    Screen {
+        background: #0d0d0d;
+        align: center middle;
+    }
+
+    #welcome-wrapper {
+        width: 80;
+        height: auto;
+    }
+
+    #welcome-header {
+        width: 100%;
+        text-align: center;
+        margin-bottom: 2;
     }
 
     #transcript-container {
         height: 1fr;
         border: none;
         padding: 1 2;
+        display: none;
     }
 
-    PromptInput {
-        height: 6;
-        margin: 1 2;
-        border: tall $primary;
+    #prompt-box {
+        background: #181818;
+        border-left: solid #3b82f6;
+        width: 100%;
+        height: auto;
+        padding: 0 1;
+        margin-bottom: 0;
+    }
+
+    #prompt-input {
+        background: transparent;
+        border: none;
+        height: 3;
+        padding: 0;
+    }
+
+    #prompt-model-pill {
+        height: 1;
+        padding: 0;
+        margin-bottom: 0;
+    }
+
+    #welcome-hints {
+        width: 100%;
+        text-align: right;
+        margin-top: 1;
+        margin-bottom: 2;
+    }
+
+    #welcome-tip {
+        width: 100%;
+        text-align: center;
+        margin-top: 2;
     }
 
     #thinking {
+        display: none;
         margin: 0 2;
         height: 1;
     }
@@ -56,6 +100,32 @@ class TyrionApp(App[None]):
         height: 1;
         background: $surface;
         color: $text;
+    }
+
+    /* Active Chat mode transitions */
+    Screen.chat-active,
+    .chat-active {
+        align: left top;
+    }
+
+    .chat-active #welcome-header,
+    .chat-active #welcome-hints,
+    .chat-active #welcome-tip {
+        display: none;
+    }
+
+    .chat-active #transcript-container {
+        display: block;
+        height: 1fr;
+    }
+
+    .chat-active #thinking {
+        display: block;
+    }
+
+    .chat-active #welcome-wrapper {
+        width: 100%;
+        margin: 0 2 1 2;
     }
     """
 
@@ -69,21 +139,34 @@ class TyrionApp(App[None]):
         self.session = session
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
         yield VerticalScroll(id="transcript-container")
+        with Vertical(id="welcome-wrapper"):
+            yield WelcomeHeader(id="welcome-header")
+            yield PromptBox(model_name=self.session.harness.config.model, id="prompt-box")
+            yield WelcomeHints(id="welcome-hints")
+            yield WelcomeTip(id="welcome-tip")
         yield ThinkingIndicator(id="thinking")
-        yield PromptInput(placeholder="Type your prompt here... (Enter to submit, Shift+Enter for newline)")
         yield TUIStatusBar(
             session_id=self.session.session_id,
             model=self.session.harness.config.model,
             cwd=str(self.session.cwd),
         )
 
+    def set_chat_active(self, active: bool) -> None:
+        """Switch between centered welcome mode and scrollable chat mode."""
+        if active:
+            self.screen.add_class("chat-active")
+            self.add_class("chat-active")
+        else:
+            self.screen.remove_class("chat-active")
+            self.remove_class("chat-active")
+
     def on_mount(self) -> None:
         """Actions to run when screen mounts."""
         self.transcript_view = self.query_one("#transcript-container", VerticalScroll)
         self.thinking_indicator = self.query_one("#thinking", ThinkingIndicator)
-        self.prompt_input = self.query_one(PromptInput)
+        self.prompt_box = self.query_one("#prompt-box", PromptBox)
+        self.prompt_input = self.query_one("#prompt-input", PromptInput)
         self.status_bar = self.query_one(TUIStatusBar)
         self.prompt_input.focus()
         self.init_session()
@@ -111,8 +194,10 @@ class TyrionApp(App[None]):
         self.session.harness.config.model = default_model
 
         self.status_bar.model = default_model
+        self.prompt_box.set_model(default_model)
         self.update_token_display()
 
+        self.set_chat_active(True)
         await self.transcript_view.mount(
             MessageWidget(
                 role="system",
@@ -141,6 +226,11 @@ class TyrionApp(App[None]):
             )
 
             messages = self.session.harness.messages
+            if messages:
+                self.set_chat_active(True)
+            else:
+                self.set_chat_active(False)
+
             i = 0
             while i < len(messages):
                 msg = messages[i]
@@ -198,8 +288,11 @@ class TyrionApp(App[None]):
             from tyrion_coding.commands import registry
             cmd = registry.get(cmd_name)
             if cmd is not None:
+                if cmd_name not in ("/clear", "/quit", "/exit", "/connect"):
+                    self.set_chat_active(True)
                 await cmd.handler(self, args)
             else:
+                self.set_chat_active(True)
                 await self.transcript_view.mount(
                     MessageWidget(
                         role="system",
@@ -225,12 +318,14 @@ class TyrionApp(App[None]):
             self.notify("An agent run is already in progress!", severity="error")
             return
 
+        self.set_chat_active(True)
         self.run_agent_loop_worker(text)
 
     async def clear_transcript(self) -> None:
-        """Clear all messages from the transcript view."""
+        """Clear all messages from the transcript view and return to welcome mode."""
         for child in list(self.transcript_view.children):
             await child.remove()
+        self.set_chat_active(False)
 
     def update_token_display(self) -> None:
         """Recalculate current session tokens and update status bar."""
@@ -279,6 +374,7 @@ class TyrionApp(App[None]):
             self.status_bar.session_id = session_id
             self.status_bar.model = target_model
             self.status_bar._update_status()
+            self.prompt_box.set_model(target_model)
 
             from tyrion_agent.messages import (
                 AssistantMessage,
@@ -287,6 +383,11 @@ class TyrionApp(App[None]):
             )
 
             messages = self.session.harness.messages
+            if messages:
+                self.set_chat_active(True)
+            else:
+                self.set_chat_active(False)
+
             i = 0
             while i < len(messages):
                 msg = messages[i]
