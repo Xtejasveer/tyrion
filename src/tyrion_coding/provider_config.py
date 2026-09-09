@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
+
 from tyrion_ai.env import OpenAICompatibleConfig
 from tyrion_ai.openai_compatible import OpenAICompatibleProvider
 from tyrion_coding.provider_catalog import (
@@ -9,35 +12,70 @@ from tyrion_coding.provider_catalog import (
     ProviderMeta,
 )
 
+CREDENTIALS_FILE = Path.home() / ".tyrion" / "credentials.json"
+
+
+def load_saved_credentials() -> dict[str, str]:
+    """Load saved API keys from disk."""
+    if not CREDENTIALS_FILE.exists():
+        return {}
+    try:
+        with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_credential(provider_name: str, api_key: str) -> None:
+    """Save an API key for a provider to disk."""
+    CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    creds = load_saved_credentials()
+    creds[provider_name.lower()] = api_key
+    try:
+        with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f:
+            json.dump(creds, f, indent=2)
+    except Exception:
+        pass
+
+
 def resolve_model_and_provider(model_name: str) -> tuple[ProviderMeta, ModelMeta]:
-    """Finds the provider and model mets matching the target model name"""
+    """Finds the provider and model meta matching the target model name."""
     for provider in PROVIDER_CATALOG.values():
         if model_name in provider.models:
             return provider, provider.models[model_name]
 
-    #Fallback to OpenAI if not mapped in registry
+    # Fallback to OpenAI if not mapped
     openai_prov = PROVIDER_CATALOG["openai"]
     fallback_model = ModelMeta(model_name, 128000, 4096)
     return openai_prov, fallback_model
 
-def get_provider_for_model(
-        model_name: str,
-) -> tuple[OpenAICompatibleProvider, ProviderMeta, ModelMeta]:
-    """Dynamically resolves environment variables and base URLs and instantiates client."""
 
+def get_provider_for_model(
+    model_name: str,
+    allow_unauthenticated: bool = False,
+) -> tuple[OpenAICompatibleProvider, ProviderMeta, ModelMeta]:
+    """Dynamically resolves environment variables, saved credentials, and base URLs."""
     provider_meta, model_meta = resolve_model_and_provider(model_name)
 
-    # 1. Resolve API key
+    # 1. Resolve API Key: check environment first, then saved credentials
     env_key = provider_meta.env_key
     api_key = os.environ.get(env_key, "")
 
     if not api_key:
+        saved_creds = load_saved_credentials()
+        api_key = saved_creds.get(provider_meta.name.lower(), "")
+
+    if not api_key:
         api_key = os.environ.get("OPENAI_API_KEY", "")
 
+    # Local Ollama/vLLM endpoints do not require keys
     if not api_key and provider_meta.name != "Local":
-        raise ValueError(
-            f"API key required. Please set {env_key} or OPENAI_API_KEY environment variable."
-        )
+        if allow_unauthenticated:
+            api_key = "unauthenticated"
+        else:
+            raise ValueError(
+                f"API key required. Please set {env_key} or connect via /connect in the UI."
+            )
     elif not api_key:
         api_key = "dummy-key"
 
@@ -50,9 +88,28 @@ def get_provider_for_model(
         base_url = provider_meta.default_base_url
 
     config = OpenAICompatibleConfig(
-        api_key = api_key,
+        api_key=api_key,
         base_url=base_url,
     )
     return OpenAICompatibleProvider(config), provider_meta, model_meta
 
 
+def connect_provider(
+    provider_name: str,
+    api_key: str,
+) -> tuple[OpenAICompatibleProvider, str]:
+    """Connect a provider by saving credentials and building an active client."""
+    save_credential(provider_name, api_key)
+
+    matched_meta = PROVIDER_CATALOG.get(provider_name.lower())
+    if matched_meta is None:
+        matched_meta = PROVIDER_CATALOG["openrouter"]
+
+    config = OpenAICompatibleConfig(
+        api_key=api_key,
+        base_url=matched_meta.default_base_url,
+    )
+
+    # Choose a default model from this provider
+    default_model = next(iter(matched_meta.models.keys()))
+    return OpenAICompatibleProvider(config), default_model

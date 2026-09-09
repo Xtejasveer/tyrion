@@ -87,6 +87,45 @@ class TyrionApp(App[None]):
         self.status_bar = self.query_one(TUIStatusBar)
         self.prompt_input.focus()
         self.init_session()
+        self.check_initial_auth()
+
+    @work
+    async def check_initial_auth(self) -> None:
+        """If unauthenticated on startup, automatically open ConnectModal."""
+        provider = self.session.harness.config.provider
+        api_key = getattr(getattr(provider, "_config", None), "api_key", "")
+        if api_key in ("", "unauthenticated"):
+            from tyrion_coding.tui.connect_modal import ConnectModal
+            result = await self.push_screen(ConnectModal())
+            if result:
+                provider_name, key = result
+                await self.apply_connection(provider_name, key)
+
+    async def apply_connection(self, provider_name: str, api_key: str) -> None:
+        """Apply new credentials, hot-swap provider, and update UI."""
+        from tyrion_coding.provider_config import connect_provider
+        from tyrion_coding.tui.widgets import MessageWidget
+
+        provider, default_model = connect_provider(provider_name, api_key)
+        self.session.harness.config.provider = provider
+        self.session.harness.config.model = default_model
+
+        self.status_bar.model = default_model
+        self.update_token_display()
+
+        await self.transcript_view.mount(
+            MessageWidget(
+                role="system",
+                content=(
+                    f"✅ **Connected to {provider_name.capitalize()}!**\n\n"
+                    f"- Model: `{default_model}`\n"
+                    "- Your API key has been saved for future sessions.\n\n"
+                    "You can now start typing your prompts below!"
+                )
+            )
+        )
+        self.transcript_view.scroll_end()
+        self.prompt_input.focus()
 
     @work
     async def init_session(self) -> None:
@@ -155,7 +194,7 @@ class TyrionApp(App[None]):
             parts = text.split()
             cmd_name = parts[0]
             args = parts[1:]
-            
+
             from tyrion_coding.commands import registry
             cmd = registry.get(cmd_name)
             if cmd is not None:
@@ -164,10 +203,22 @@ class TyrionApp(App[None]):
                 await self.transcript_view.mount(
                     MessageWidget(
                         role="system",
-                        content=f"❌ Unknown command: [bold]{cmd_name}[/bold]. Type `/help` for a list of commands."
+                        content=f"❌ Unknown command: `{cmd_name}`. Type `/help` for a list of commands."
                     )
                 )
                 self.transcript_view.scroll_end()
+            return
+
+        # Check authentication before proceeding
+        provider = self.session.harness.config.provider
+        api_key = getattr(getattr(provider, "_config", None), "api_key", "")
+        if api_key in ("", "unauthenticated"):
+            self.notify("Please connect an API key first!", severity="error")
+            from tyrion_coding.tui.connect_modal import ConnectModal
+            result = await self.push_screen(ConnectModal())
+            if result:
+                provider_name, key = result
+                await self.apply_connection(provider_name, key)
             return
 
         if self.session.harness.is_running:
@@ -209,7 +260,7 @@ class TyrionApp(App[None]):
             target_model = state.model or self.session.harness.config.model
 
             from tyrion_coding.provider_config import get_provider_for_model
-            provider, _, _ = get_provider_for_model(target_model)
+            provider, _, _ = get_provider_for_model(target_model, allow_unauthenticated=True)
 
             from tyrion_coding.session import CodingSession
             session = CodingSession(
@@ -279,12 +330,11 @@ class TyrionApp(App[None]):
     @work(exclusive=True)
     async def run_agent_loop_worker(self, prompt_text: str) -> None:
         """Runs the harness prompt loop inside a background worker."""
-        # 1. Check for automatic compaction threshold
         if self.session.needs_compaction():
             await self.transcript_view.mount(
                 MessageWidget(
                     "system",
-                    "🧹 [bold yellow]Context size near limit. Starting automatic compaction...[/bold yellow]"
+                    "🧹 Context size near limit. Starting automatic compaction..."
                 )
             )
             self.transcript_view.scroll_end()
@@ -296,7 +346,7 @@ class TyrionApp(App[None]):
                 await self.transcript_view.mount(
                     MessageWidget(
                         "system",
-                        "✅ [bold green]Context compaction complete![/bold green]"
+                        "✅ Context compaction complete!"
                     )
                 )
                 self.transcript_view.scroll_end()
@@ -306,7 +356,6 @@ class TyrionApp(App[None]):
         self.status_bar.set_status("Running")
         self.thinking_indicator.visible = True
 
-        # Append User Message to UI
         user_widget = MessageWidget("user", prompt_text)
         await self.transcript_view.mount(user_widget)
         self.transcript_view.scroll_end()
@@ -336,7 +385,6 @@ class TyrionApp(App[None]):
                             self.transcript_view.scroll_end()
 
                         elif isinstance(inner_event, ThinkingDeltaEvent):
-                            # Streaming reasoning, currently ignored in rendering
                             pass
 
                 elif isinstance(agent_event, MessageEndEvent):

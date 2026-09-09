@@ -114,7 +114,7 @@ def _run_tui(
     resume: str | None,
 ) -> None:
     try:
-        provider, _, _ = get_provider_for_model(model)
+        provider, _, _ = get_provider_for_model(model, allow_unauthenticated=True)
     except ValueError as exc:
         print(f"Error: {exc}")
         raise typer.Exit(1)
