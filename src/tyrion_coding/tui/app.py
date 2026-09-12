@@ -172,17 +172,23 @@ class TyrionApp(App[None]):
         self.init_session()
         self.check_initial_auth()
 
-    @work
-    async def check_initial_auth(self) -> None:
+    def check_initial_auth(self) -> None:
         """If unauthenticated on startup, automatically open ConnectModal."""
         provider = self.session.harness.config.provider
         api_key = getattr(getattr(provider, "_config", None), "api_key", "")
         if api_key in ("", "unauthenticated"):
-            from tyrion_coding.tui.connect_modal import ConnectModal
-            result = await self.push_screen(ConnectModal())
+            self.prompt_connect()
+
+    def prompt_connect(self) -> None:
+        """Open ConnectModal and apply result via callback."""
+        from tyrion_coding.tui.connect_modal import ConnectModal
+
+        def on_connected(result: tuple[str, str] | None) -> None:
             if result:
                 provider_name, key = result
-                await self.apply_connection(provider_name, key)
+                self.run_worker(self.apply_connection(provider_name, key))
+
+        self.push_screen(ConnectModal(), callback=on_connected)
 
     async def apply_connection(self, provider_name: str, api_key: str) -> None:
         """Apply new credentials, hot-swap provider, and update UI."""
@@ -307,11 +313,7 @@ class TyrionApp(App[None]):
         api_key = getattr(getattr(provider, "_config", None), "api_key", "")
         if api_key in ("", "unauthenticated"):
             self.notify("Please connect an API key first!", severity="error")
-            from tyrion_coding.tui.connect_modal import ConnectModal
-            result = await self.push_screen(ConnectModal())
-            if result:
-                provider_name, key = result
-                await self.apply_connection(provider_name, key)
+            self.prompt_connect()
             return
 
         if self.session.harness.is_running:

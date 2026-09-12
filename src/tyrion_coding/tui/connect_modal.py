@@ -92,8 +92,13 @@ class ConnectModal(ModalScreen[tuple[str, str] | None]):
             )
 
     def on_mount(self) -> None:
-        """Focus the key input field automatically on mount."""
-        self.query_one("#key-input", Input).focus()
+        """Focus the key input field and pre-fill existing credentials if available."""
+        from tyrion_coding.provider_config import load_saved_credentials
+        key_input = self.query_one("#key-input", Input)
+        saved = load_saved_credentials()
+        if "openrouter" in saved:
+            key_input.value = saved["openrouter"]
+        key_input.focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button click."""
@@ -113,7 +118,11 @@ class ConnectModal(ModalScreen[tuple[str, str] | None]):
             return
 
         provider_select = self.query_one("#provider-select", Select)
-        selected_provider = str(provider_select.value) if provider_select.value else "openrouter"
+        val = provider_select.value
+        if val is None or val == Select.BLANK:
+            selected_provider = "openrouter"
+        else:
+            selected_provider = str(val)
 
         self.dismiss((selected_provider, key))
 

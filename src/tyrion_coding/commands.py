@@ -103,9 +103,12 @@ async def handle_model(app: TyrionApp, args: list[str]) -> None:
 async def handle_resume(app: TyrionApp, args: list[str]) -> None:
     """Trigger the session picker screen."""
     from tyrion_coding.tui.picker import SessionPickerModal
-    session_id = await app.push_screen(SessionPickerModal())
-    if session_id:
-        app.run_resume_worker(session_id)
+
+    def on_picked(session_id: str | None) -> None:
+        if session_id:
+            app.run_resume_worker(session_id)
+
+    app.push_screen(SessionPickerModal(), callback=on_picked)
 
 
 async def handle_compact(app: TyrionApp, args: list[str]) -> None:
@@ -151,12 +154,7 @@ async def handle_compact(app: TyrionApp, args: list[str]) -> None:
 
 async def handle_connect(app: TyrionApp, args: list[str]) -> None:
     """Open modal dialog to connect model provider and enter API key."""
-    from tyrion_coding.tui.connect_modal import ConnectModal
-
-    result = await app.push_screen(ConnectModal())
-    if result:
-        provider_name, api_key = result
-        await app.apply_connection(provider_name, api_key)
+    app.prompt_connect()
 
 
 # Register defaults

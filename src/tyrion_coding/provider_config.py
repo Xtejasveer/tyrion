@@ -55,6 +55,14 @@ def get_provider_for_model(
     allow_unauthenticated: bool = False,
 ) -> tuple[OpenAICompatibleProvider, ProviderMeta, ModelMeta]:
     """Dynamically resolves environment variables, saved credentials, and base URLs."""
+    saved_creds = load_saved_credentials()
+
+    # If the user ran with default model but only has openrouter credentials, auto-route to openrouter
+    if model_name in ("gpt-4.1-mini", "default"):
+        if not os.environ.get("OPENAI_API_KEY") and not saved_creds.get("openai"):
+            if "openrouter" in saved_creds or os.environ.get("OPENROUTER_API_KEY"):
+                model_name = "google/gemini-2.5-flash"
+
     provider_meta, model_meta = resolve_model_and_provider(model_name)
 
     # 1. Resolve API Key: check environment first, then saved credentials
@@ -62,11 +70,28 @@ def get_provider_for_model(
     api_key = os.environ.get(env_key, "")
 
     if not api_key:
-        saved_creds = load_saved_credentials()
         api_key = saved_creds.get(provider_meta.name.lower(), "")
 
     if not api_key:
         api_key = os.environ.get("OPENAI_API_KEY", "")
+
+    # Fallback to OpenRouter if user has an OpenRouter key configured
+    if not api_key and provider_meta.name != "Local":
+        if "openrouter" in saved_creds or os.environ.get("OPENROUTER_API_KEY"):
+            openrouter_key = os.environ.get("OPENROUTER_API_KEY") or saved_creds.get("openrouter", "")
+            openrouter_prov = PROVIDER_CATALOG["openrouter"]
+            if model_name in openrouter_prov.models:
+                provider_meta = openrouter_prov
+                model_meta = openrouter_prov.models[model_name]
+                api_key = openrouter_key
+            elif f"openai/{model_name}" in openrouter_prov.models:
+                provider_meta = openrouter_prov
+                model_meta = openrouter_prov.models[f"openai/{model_name}"]
+                api_key = openrouter_key
+            else:
+                provider_meta = openrouter_prov
+                model_meta = openrouter_prov.models["google/gemini-2.5-flash"]
+                api_key = openrouter_key
 
     # Local Ollama/vLLM endpoints do not require keys
     if not api_key and provider_meta.name != "Local":
@@ -104,6 +129,13 @@ def connect_provider(
     matched_meta = PROVIDER_CATALOG.get(provider_name.lower())
     if matched_meta is None:
         matched_meta = PROVIDER_CATALOG["openrouter"]
+
+    # Also update current process environment variables
+    os.environ[matched_meta.env_key] = api_key
+    if provider_name.lower() == "openrouter":
+        os.environ["OPENROUTER_API_KEY"] = api_key
+    elif provider_name.lower() == "openai":
+        os.environ["OPENAI_API_KEY"] = api_key
 
     config = OpenAICompatibleConfig(
         api_key=api_key,

@@ -39,9 +39,11 @@ PROVIDER_CATALOG: dict[str, ProviderMeta] = {
         env_key="OPENROUTER_API_KEY",
         default_base_url="https://openrouter.ai/api/v1",
         models={
-            "anthropic/claude-3.5-sonnet": ModelMeta("anthropic/claude-3.5-sonnet", 200000, 8192),
-            "google/gemini-2.5-pro": ModelMeta("google/gemini-2.5-pro", 2000000, 8192),
             "google/gemini-2.5-flash": ModelMeta("google/gemini-2.5-flash", 1000000, 8192),
+            "google/gemini-2.5-pro": ModelMeta("google/gemini-2.5-pro", 2000000, 8192),
+            "openai/gpt-4o-mini": ModelMeta("openai/gpt-4o-mini", 128000, 16384),
+            "openai/gpt-4o": ModelMeta("openai/gpt-4o", 128000, 4096),
+            "anthropic/claude-sonnet-4.5": ModelMeta("anthropic/claude-sonnet-4.5", 200000, 8192),
             "meta-llama/llama-3.3-70b-instruct": ModelMeta("meta-llama/llama-3.3-70b-instruct", 128000, 4096),
         },
     ),
