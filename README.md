@@ -20,13 +20,14 @@
 Works on **macOS and Linux**. On Windows, use [WSL](https://learn.microsoft.com/windows/wsl/install).
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh | sh && exec "$SHELL" -l
 ```
 
-Then run `tyrion` to start. The script installs [`uv`](https://docs.astral.sh/uv/) if you don't have it, then installs Tyrion into its own isolated environment. You don't need Python installed (uv fetches Python 3.12 for you), and it never uses `sudo`. Want to read it first? [`install.sh`](install.sh) is short.
+Then just run `tyrion`. The `&& exec "$SHELL" -l` at the end restarts your shell so `tyrion` works right away in this same terminal window. (In scripts and CI, leave that part off: there is no shell to restart.) The script installs [`uv`](https://docs.astral.sh/uv/) if you don't have it, then installs Tyrion into its own isolated environment. You don't need Python installed (uv fetches Python 3.12 for you), and it never uses `sudo`. Want to read it first? [`install.sh`](install.sh) is short.
 
 - **Update:** run the install command again.
 - **Uninstall:** `uv tool uninstall tyrion-cli` (your chats and settings in `~/.tyrion` are left alone; delete that folder to remove them too).
+- **`command not found: tyrion`?** The terminal window you installed from can't see the new command yet (this happens if the command was run without the `&& exec "$SHELL" -l` part). Run `exec "$SHELL" -l`, or open a new terminal window, or run `export PATH="$HOME/.local/bin:$PATH"` and try again. The installer prints these for you at the end.
 
 ---
 

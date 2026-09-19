@@ -1,7 +1,11 @@
 #!/bin/sh
 # Tyrion installer
 #
-#   curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh | sh
+#   curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh | sh && exec "$SHELL" -l
+#
+# The `&& exec "$SHELL" -l` on the end restarts your shell, so `tyrion` works in the same
+# terminal right away (a script can't change the PATH of the terminal that started it, but
+# your own shell can). Leave it off in scripts and CI.
 #
 # What this does, so you can decide before running it:
 #   1. Installs `uv` (a fast Python installer, https://docs.astral.sh/uv/) if you don't have it.
@@ -31,11 +35,13 @@ INSTALL_FROM_PYPI="${TYRION_FROM_PYPI:-0}"
 if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ]; then
     GOLD='\033[1;33m'
     RED='\033[1;31m'
+    BOLD='\033[1m'
     DIM='\033[2m'
     RESET='\033[0m'
 else
     GOLD=''
     RED=''
+    BOLD=''
     DIM=''
     RESET=''
 fi
@@ -98,6 +104,38 @@ ensure_uv() {
     command -v uv >/dev/null 2>&1 || fail "uv was installed but could not be found. Open a new terminal and run this command again."
 }
 
+# Tyrion is installed, but the terminal window the user is typing in was opened before it
+# existed, and a script can never change the PATH of the terminal that launched it. So say so
+# plainly, and give ONE line that fixes PATH and starts Tyrion. New terminal windows need
+# nothing, because uv adds its bin folder to the shell profile.
+print_path_help() {
+    dir="$1"
+    case "$dir" in
+        "$HOME"/*) shown="\$HOME${dir#"$HOME"}" ;;
+        *) shown="$dir" ;;
+    esac
+
+    uv tool update-shell >/dev/null 2>&1 || true
+
+    case "${SHELL:-}" in
+        */fish) fix="fish_add_path $shown; and tyrion" ;;
+        *) fix="export PATH=\"$shown:\$PATH\" && tyrion" ;;
+    esac
+
+    say "${GOLD}▶ One more step${RESET}"
+    say "  Tyrion is installed, but this terminal window was opened before it existed and"
+    say "  can't see it yet. ${BOLD}Copy and run this line${RESET} to start Tyrion right now:"
+    say ""
+    say "      $fix"
+    say ""
+    say "  Or restart your shell instead, then type tyrion:"
+    say ""
+    say "      exec \"\$SHELL\" -l"
+    say ""
+    say "  After that, every new terminal window finds ${GOLD}tyrion${RESET} on its own."
+    say ""
+}
+
 main() {
     # The PATH the user's shell has right now. ensure_uv may add to PATH for this script
     # only, so we compare against this to know whether a new terminal is needed.
@@ -134,27 +172,20 @@ main() {
 
     say ""
     say "${GOLD}✓${RESET} Installed: $installed"
+    say "${DIM}Update: run this installer again    Uninstall: uv tool uninstall $PACKAGE${RESET}"
     say ""
 
     case ":$original_path:" in
-        *":$bin_dir:"*) ;;
-        *)
-            # Not on the user's PATH yet. Let uv add it to their shell profile, and tell
-            # them how to use Tyrion in this very terminal.
-            uv tool update-shell >/dev/null 2>&1 || true
-            say "Open a new terminal, or run this to use Tyrion right away:"
-            say ""
-            say "    export PATH=\"$bin_dir:\$PATH\""
+        *":$bin_dir:"*)
+            say "Get started:"
+            say "    tyrion                      launch the app (it asks for an API key the first time)"
+            say "    tyrion \"explain this repo\"    run a single prompt"
             say ""
             ;;
+        *)
+            print_path_help "$bin_dir"
+            ;;
     esac
-
-    say "Get started:"
-    say "    tyrion                    launch the app (it will ask for an API key the first time)"
-    say "    tyrion \"explain this repo\"  run a single prompt"
-    say ""
-    say "${DIM}Update: run this installer again    Uninstall: uv tool uninstall $PACKAGE${RESET}"
-    say ""
 }
 
 # Everything above only defines functions. Nothing runs until this last line, so a
