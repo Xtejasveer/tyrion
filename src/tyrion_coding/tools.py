@@ -28,11 +28,23 @@ MAX_READ_LINES = 2000
 MAX_READ_BYTES = 50_000
 MAX_OUTPUT_LINES = 2000
 MAX_OUTPUT_BYTES = 50_000
+_CANCEL_POLL_SECONDS = 0.2  # how often a running bash command checks for cancel
 
 
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+def _kill_process_group(proc: asyncio.subprocess.Process) -> None:
+    """Kill a shell command and everything it spawned."""
+    try:
+        os.killpg(proc.pid, 9)
+    except (ProcessLookupError, PermissionError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass  # already exited
 
 
 def _resolve_path(cwd: Path, path_arg: str) -> Path:
@@ -376,6 +388,7 @@ def create_bash_tool(cwd: str | Path = ".") -> AgentTool:
                 return _error("'timeout' must be a positive number.")
 
         timed_out = False
+        cancelled = False
         try:
             proc = await asyncio.create_subprocess_shell(
                 command,
@@ -385,19 +398,36 @@ def create_bash_tool(cwd: str | Path = ".") -> AgentTool:
                 start_new_session=True,  # so we can kill the whole group
             )
 
+            communicate_task = asyncio.ensure_future(proc.communicate())
+            event_loop = asyncio.get_running_loop()
+            deadline = None if timeout is None else event_loop.time() + timeout
+
             try:
-                stdout_bytes, _ = await asyncio.wait_for(
-                    proc.communicate(),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                timed_out = True
-                # Kill the entire process group
-                try:
-                    os.killpg(proc.pid, 9)
-                except (ProcessLookupError, PermissionError):
-                    proc.kill()
-                stdout_bytes, _ = await proc.communicate()
+                # Wake up regularly to notice cancellation and the timeout.
+                while True:
+                    if communicate_task.done():
+                        break
+                    if signal is not None and signal.is_cancelled():
+                        cancelled = True
+                        break
+                    wait_seconds = _CANCEL_POLL_SECONDS
+                    if deadline is not None:
+                        remaining = deadline - event_loop.time()
+                        if remaining <= 0:
+                            timed_out = True
+                            break
+                        wait_seconds = min(wait_seconds, remaining)
+                    await asyncio.wait({communicate_task}, timeout=wait_seconds)
+
+                if cancelled or timed_out:
+                    _kill_process_group(proc)
+                stdout_bytes, _ = await communicate_task
+            finally:
+                # Also covers the whole run being cancelled from outside.
+                if not communicate_task.done():
+                    communicate_task.cancel()
+                if proc.returncode is None:
+                    _kill_process_group(proc)
 
         except OSError as exc:
             return _error(f"Cannot execute command: {exc}")
@@ -428,7 +458,10 @@ def create_bash_tool(cwd: str | Path = ".") -> AgentTool:
             output = f"[Output truncated. Full output saved to {full_output_path}]\n\n" + output
 
         # Build result message
-        if timed_out:
+        if cancelled:
+            text = f"Command cancelled by the user.\n\n{output}"
+            is_error_result = True
+        elif timed_out:
             text = f"Command timed out after {timeout}s.\n\n{output}"
             is_error_result = True
         elif exit_code != 0:

@@ -80,20 +80,20 @@ async def run_agent_loop(
         yield MessageStartEvent(message=error)
         yield MessageEndEvent(message=error)
         yield TurnEndEvent(message=error)
-        yield AgentEndEvent(message=error)
-        return 
+        yield AgentEndEvent(messages=new_messages)
+        return
 
     ## --- Main Loop ---
     while True:
         # check max turns
         if max_turns is not None and turn > max_turns:
-            error = _error_message(model, "max turns must be atleat 1")
+            error = _error_message(model, f"Reached the max turns limit ({max_turns})")
             messages.append(error)
             new_messages.append(error)
             yield MessageStartEvent(message=error)
             yield MessageEndEvent(message=error)
             yield TurnEndEvent(message=error)
-            yield AgentEndEvent(message=error)
+            yield AgentEndEvent(messages=new_messages)
             return
         assistant : AssistantMessage | None = None
 
@@ -144,6 +144,12 @@ async def run_agent_loop(
 
         if not calls:
             break
+
+        # Cancelled while tools were running: stop here instead of asking the
+        # model for another turn.
+        if signal is not None and signal.is_cancelled():
+            yield AgentEndEvent(messages=new_messages)
+            return
         yield TurnStartEvent()
     yield AgentEndEvent(messages=new_messages)
 

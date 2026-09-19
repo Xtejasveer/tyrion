@@ -30,6 +30,12 @@ from tyrion_ai.env import OpenAICompatibleConfig
 from tyrion_ai.http import create_http_client
 
 
+def _is_cancelled(signal: object | None) -> bool:
+    """True if a cancellation token was passed and has been triggered."""
+    is_cancelled = getattr(signal, "is_cancelled", None)
+    return bool(is_cancelled()) if callable(is_cancelled) else False
+
+
 class OpenAICompatibleProvider:
     """Provider for OpenAI-compatible /chat/completions APIs."""
 
@@ -50,14 +56,19 @@ class OpenAICompatibleProvider:
             signal :object | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Stream a chat completion response."""
-        return self._stream(model, system, messages, tools)
+        return self._stream(model, system, messages, tools, signal)
     async def _stream(
             self,
             model: str,
             system :str,
             messages :list[AgentMessage],
             tools :list[AgentTool],
+            signal :object | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
+        if _is_cancelled(signal):
+            yield AssistantErrorEvent(error=self._build_aborted(model, ""))
+            return
+
         # 1. Build the request payload
         payload = self._build_payload(model, system, messages, tools)
 
@@ -80,7 +91,7 @@ class OpenAICompatibleProvider:
                         )
                     )
                     return
-                async for event in self._parse_sse_stream(response, model):
+                async for event in self._parse_sse_stream(response, model, signal):
                     yield event
 
         except httpx.HTTPError as exc:
@@ -115,6 +126,10 @@ class OpenAICompatibleProvider:
                     "content" : msg.content,
                 })
             elif isinstance(msg, AssistantMessage):
+                # An assistant turn with no text and no tool calls (an aborted
+                # or failed response) is rejected by the API, so don't replay it.
+                if not msg.text and not msg.tool_calls:
+                    continue
                 openai_msg :dict[str, Any] = {
                     "role" :"assistant",
                     "content" : msg.text or None,
@@ -169,6 +184,7 @@ class OpenAICompatibleProvider:
             self,
             response: httpx.Response,
             model : str,
+            signal :object | None = None,
     ) -> AsyncIterator[AssistantMessageEvent]:
         """Parse OpenAI's Server-Sent Events stream into Tyrion events."""
 
@@ -178,6 +194,13 @@ class OpenAICompatibleProvider:
         started = False
 
         async for line in response.aiter_lines():
+            # Stop reading (and close the connection) as soon as the user cancels.
+            if _is_cancelled(signal):
+                yield AssistantErrorEvent(
+                    error=self._build_aborted(model, text_so_far)
+                )
+                return
+
             # SSE Format: each chunk is "data: {json}\n\n"
             if not line.startswith("data: "):
                 continue
@@ -216,12 +239,15 @@ class OpenAICompatibleProvider:
             if "tool_calls" in delta:
                 for tc_delta in delta["tool_calls"]:
                     index = tc_delta["index"]
+                    function = tc_delta.get("function") or {}
+                    arg_delta = function.get("arguments") or ""
                     if index not in tool_calls_so_far:
-                        # New tool call starting
+                        # New tool call starting. Some providers send the whole
+                        # argument string in this first chunk, so keep it.
                         tool_calls_so_far[index] = {
-                            "id": tc_delta.get("id", ""),
-                            "name": tc_delta.get("function", {}).get("name", ""),
-                            "arguments": "",
+                            "id": tc_delta.get("id") or "",
+                            "name": function.get("name") or "",
+                            "arguments": arg_delta,
                         }
                         partial = self._build_partial(
                             model, text_so_far, tool_calls_so_far
@@ -236,9 +262,17 @@ class OpenAICompatibleProvider:
                             ),
                             partial=partial,
                         )
+                        if arg_delta:
+                            yield ToolCallDeltaEvent(
+                                delta=arg_delta,
+                                tool_call=ToolCall(
+                                    id=tool_calls_so_far[index]["id"],
+                                    name=tool_calls_so_far[index]["name"],
+                                ),
+                                partial=partial,
+                            )
                     else:
                         # Existing tool call — accumulate argument chunks
-                        arg_delta = tc_delta.get("function", {}).get("arguments", "")
                         tool_calls_so_far[index]["arguments"] += arg_delta
                         partial = self._build_partial(
                             model, text_so_far, tool_calls_so_far
@@ -253,11 +287,19 @@ class OpenAICompatibleProvider:
                         )
             # Finish — emit end events for tool calls and the final message
             if finish_reason is not None:
-                final = self._build_final(model, text_so_far, tool_calls_so_far, finish_reason)
-
                 if not started:
-                    started = True
-                    yield AssistantStartEvent(partial=partial)
+                    # The model finished without producing any text or tool calls.
+                    yield AssistantErrorEvent(
+                        error=AssistantMessage(
+                            model=model,
+                            content=[],
+                            stop_reason="error",
+                            error_message="Provider returned an empty response",
+                        )
+                    )
+                    return
+
+                final = self._build_final(model, text_so_far, tool_calls_so_far, finish_reason)
 
                 for tc_data in tool_calls_so_far.values():
                     args = self._safe_parse_arguments(tc_data["arguments"])
@@ -284,6 +326,18 @@ class OpenAICompatibleProvider:
                 )
             )
     ## helpers:
+
+    def _build_aborted(self, model: str, text: str) -> AssistantMessage:
+        """Build the message for a response the user cancelled mid-stream.
+
+        Unfinished tool calls are dropped: their arguments are incomplete, so
+        replaying them to the model later would be invalid.
+        """
+        return AssistantMessage(
+            model=model,
+            content=[TextContent(text=text)] if text else [],
+            stop_reason="aborted",
+        )
 
     def _build_partial(
             self,

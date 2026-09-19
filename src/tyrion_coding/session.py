@@ -8,17 +8,40 @@ from pathlib import Path
 
 from tyrion_agent.events import AgentEvent, MessageEndEvent
 from tyrion_agent.harness import AgentHarness, AgentHarnessConfig
+from tyrion_agent.messages import AgentMessage, ToolResultMessage, UserMessage
 from tyrion_agent.provider import ModelProvider
-from tyrion_agent.sessions.entries import MessageEntry, SessionInfoEntry
+from tyrion_agent.provider_events import AssistantErrorEvent, TextDeltaEvent
+from tyrion_agent.sessions.entries import (
+    CompactionEntry,
+    MessageEntry,
+    SessionInfoEntry,
+)
 from tyrion_agent.sessions.jsonl import JsonlSessionStorage
 from tyrion_agent.sessions.tree import reconstruct_state
 from tyrion_agent.tools import AgentTool
 from tyrion_coding.system_prompt import assemble_system_prompt
 from tyrion_coding.tools import create_coding_tools
 
+# How many of the most recent messages compaction leaves untouched.
+COMPACTION_KEEP_MESSAGES = 6
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex
+
+
+def _compaction_split(messages: list[AgentMessage], keep: int) -> int:
+    """Index where the kept tail starts; everything before it gets summarized.
+
+    The tail must not start with a tool result, or its tool call would be
+    summarized away and the provider would reject the orphaned result. So the
+    split moves earlier until the tail starts at a tool call or a user message.
+    Returns 0 when there is nothing to summarize.
+    """
+    split = len(messages) - keep
+    while split > 0 and isinstance(messages[split], ToolResultMessage):
+        split -= 1
+    return max(split, 0)
 
 
 class CodingSession:
@@ -150,14 +173,22 @@ class CodingSession:
         return current_tokens >= (threshold * limit)
 
     async def compact(self) -> None:
-        """Compact the oldest part of the transcript by asking the model to summarize it."""
-        messages = list(self.harness.messages)
+        """Replace the oldest part of the transcript with a model-written summary.
 
-        # Require at least 7 messages to run compaction (keeps last 6, summarizes rest)
-        if len(messages) <= 6:
+        The last few messages are kept as they are. The summarized entries are
+        recorded in the CompactionEntry so that rebuilding the session drops them.
+        Raises if the summary can't be produced, leaving the transcript untouched.
+        """
+        # Work from what is saved on disk, since that is what resume() rebuilds.
+        state = reconstruct_state(await self.storage.read_all())
+        messages = state.messages
+
+        split = _compaction_split(messages, keep=COMPACTION_KEEP_MESSAGES)
+        if split <= 0:
             return
 
-        to_summarize = messages[:-6]
+        to_summarize = messages[:split]
+        replaced_entry_ids = state.message_entry_ids[:split]
 
         # Serialize history for summary prompt
         history_lines = []
@@ -175,8 +206,6 @@ class CodingSession:
             history_lines.append(f"[{role}]: {content}")
         history_text = "\n".join(history_lines)
 
-        from tyrion_agent.messages import UserMessage
-
         summary_prompt = [
             UserMessage(
                 content=(
@@ -189,6 +218,7 @@ class CodingSession:
         ]
 
         summary_text = ""
+        summary_error: str | None = None
         # Invoke backing provider directly to stream the summary
         async for event in self.harness.config.provider.stream_response(
             model=self.harness.config.model,
@@ -196,23 +226,25 @@ class CodingSession:
             messages=summary_prompt,
             tools=[],
         ):
-            from tyrion_agent.provider_events import TextDeltaEvent
-
             if isinstance(event, TextDeltaEvent):
                 summary_text += event.delta
+            elif isinstance(event, AssistantErrorEvent):
+                summary_error = event.error.error_message or "unknown error"
 
+        # The old messages are about to be dropped from context, so never
+        # replace them with an empty or placeholder summary.
+        if summary_error is not None:
+            raise RuntimeError(f"Could not summarize the conversation: {summary_error}")
         summary_text = summary_text.strip()
         if not summary_text:
-            summary_text = "Compacted history summary."
+            raise RuntimeError("The model returned an empty summary; compaction aborted.")
 
         # Append CompactionEntry log node
-        from tyrion_agent.sessions.entries import CompactionEntry
-
         compaction_entry = CompactionEntry(
             id=_new_id(),
             parent_id=self._parent_id,
             summary=summary_text,
-            replaced_entry_ids=[],
+            replaced_entry_ids=replaced_entry_ids,
         )
 
         await self.storage.append(compaction_entry)

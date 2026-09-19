@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from tyrion_agent.messages import AgentMessage
+from tyrion_agent.messages import AgentMessage, UserMessage
 from tyrion_agent.sessions.entries import (
     CompactionEntry,
     LeafEntry,
@@ -27,6 +27,9 @@ class SessionState:
     leaf_id: str | None = None
     entries: list[SessionEntry] = field(default_factory=list)
     messages: list[AgentMessage] = field(default_factory=list)
+    # Log entry id behind each item in `messages` (same length, same order).
+    # A compaction summary is identified by its CompactionEntry id.
+    message_entry_ids: list[str] = field(default_factory=list)
 
 
 def index_entries(entries: Sequence[SessionEntry]) -> dict[str, SessionEntry]:
@@ -79,6 +82,9 @@ def reconstruct_state(
         entries=list(path), leaf_id=path[-1].id if path else None
     )
 
+    # (entry id, message) pairs, so a compaction can drop the messages it replaced.
+    pairs: list[tuple[str, AgentMessage]] = []
+
     for entry in path:
         if isinstance(entry, SessionInfoEntry):
             state.session_id = entry.session_id
@@ -91,18 +97,21 @@ def reconstruct_state(
         elif isinstance(entry, ModelChangeEntry):
             state.model = entry.model
         elif isinstance(entry, MessageEntry):
-            state.messages.append(entry.message)
+            pairs.append((entry.id, entry.message))
         elif isinstance(entry, CompactionEntry):
-            from tyrion_agent.messages import UserMessage
-
-            state.messages.append(
-                UserMessage(
-                    content=(
-                        "System Notification: The preceding conversation history "
-                        "has been compacted. Summary of past events:\n\n"
-                        f"{entry.summary}"
-                    )
+            # The summary stands in for the messages it replaced: drop those
+            # and put the summary first, ahead of the messages that were kept.
+            replaced = set(entry.replaced_entry_ids)
+            kept = [(entry_id, msg) for entry_id, msg in pairs if entry_id not in replaced]
+            summary = UserMessage(
+                content=(
+                    "System Notification: The preceding conversation history "
+                    "has been compacted. Summary of past events:\n\n"
+                    f"{entry.summary}"
                 )
             )
+            pairs = [(entry.id, summary), *kept]
 
+    state.messages = [msg for _, msg in pairs]
+    state.message_entry_ids = [entry_id for entry_id, _ in pairs]
     return state
