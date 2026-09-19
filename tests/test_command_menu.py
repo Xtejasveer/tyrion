@@ -282,8 +282,7 @@ async def test_an_unknown_command_still_reports_unknown(tmp_path: Path) -> None:
 
         await _press(pilot, "enter")
 
-        # Textual's Static replaces `.content` with the rendered Panel, so dig the text out.
-        texts = [w.content.renderable.markup for w in app.query(MessageWidget)]
+        texts = [w.text for w in app.query(MessageWidget)]
         assert any("Unknown command" in text for text in texts)
 
 

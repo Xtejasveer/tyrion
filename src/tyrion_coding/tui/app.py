@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from textual import work
 from textual.app import App, ComposeResult
@@ -13,8 +14,15 @@ from tyrion_agent.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
-from tyrion_agent.messages import AssistantMessage
+from tyrion_agent.messages import (
+    AgentMessage,
+    AssistantMessage,
+    ToolResultMessage,
+    UserMessage,
+)
 from tyrion_coding.session_coding import SessionManager
+from tyrion_coding.theme import RICH_THEME
+from tyrion_coding.tui.styles import APP_CSS, TYRION_THEME
 from tyrion_coding.tui.welcome import WelcomeHeader, WelcomeHints, WelcomeTip
 from tyrion_coding.tui.widgets import (
     MessageWidget,
@@ -32,104 +40,8 @@ if TYPE_CHECKING:
 class TyrionApp(App[None]):
     """Tyrion Interactive Terminal User Interface."""
 
-    CSS = """
-    Screen {
-        background: #0d0d0d;
-        align: center middle;
-    }
-
-    #welcome-wrapper {
-        width: 80;
-        height: auto;
-    }
-
-    #welcome-header {
-        width: 100%;
-        text-align: center;
-        margin-bottom: 2;
-    }
-
-    #transcript-container {
-        height: 1fr;
-        border: none;
-        padding: 1 2;
-        display: none;
-    }
-
-    #prompt-box {
-        background: #181818;
-        border-left: solid #3b82f6;
-        width: 100%;
-        height: auto;
-        padding: 0 1;
-        margin-bottom: 0;
-    }
-
-    #prompt-input {
-        background: transparent;
-        border: none;
-        height: 3;
-        padding: 0;
-    }
-
-    #prompt-model-pill {
-        height: 1;
-        padding: 0;
-        margin-bottom: 0;
-    }
-
-    #welcome-hints {
-        width: 100%;
-        text-align: right;
-        margin-top: 1;
-        margin-bottom: 2;
-    }
-
-    #welcome-tip {
-        width: 100%;
-        text-align: center;
-        margin-top: 2;
-    }
-
-    #thinking {
-        display: none;
-        margin: 0 2;
-        height: 1;
-    }
-
-    TUIStatusBar {
-        dock: bottom;
-        height: 1;
-        background: $surface;
-        color: $text;
-    }
-
-    /* Active Chat mode transitions */
-    Screen.chat-active,
-    .chat-active {
-        align: left top;
-    }
-
-    .chat-active #welcome-header,
-    .chat-active #welcome-hints,
-    .chat-active #welcome-tip {
-        display: none;
-    }
-
-    .chat-active #transcript-container {
-        display: block;
-        height: 1fr;
-    }
-
-    .chat-active #thinking {
-        display: block;
-    }
-
-    .chat-active #welcome-wrapper {
-        width: 100%;
-        margin: 0 2 1 2;
-    }
-    """
+    CSS = APP_CSS
+    TITLE = "Tyrion"
 
     BINDINGS = [
         ("escape", "cancel_run", "Cancel execution"),
@@ -139,15 +51,19 @@ class TyrionApp(App[None]):
     def __init__(self, session: CodingSession) -> None:
         super().__init__()
         self.session = session
+        # Colors for markdown rendered inside widgets, and for Textual's own widgets.
+        self.console.push_theme(RICH_THEME)
+        self.register_theme(TYRION_THEME)
+        self.theme = TYRION_THEME.name
 
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="transcript-container")
+        yield ThinkingIndicator(id="thinking")
         with Vertical(id="welcome-wrapper"):
             yield WelcomeHeader(id="welcome-header")
             yield PromptBox(model_name=self.session.harness.config.model, id="prompt-box")
             yield WelcomeHints(id="welcome-hints")
             yield WelcomeTip(id="welcome-tip")
-        yield ThinkingIndicator(id="thinking")
         yield TUIStatusBar(
             session_id=self.session.session_id,
             model=self.session.harness.config.model,
@@ -209,7 +125,6 @@ class TyrionApp(App[None]):
     async def apply_connection(self, provider_name: str, api_key: str) -> None:
         """Apply new credentials, hot-swap provider, and update UI."""
         from tyrion_coding.provider_config import connect_provider
-        from tyrion_coding.tui.widgets import MessageWidget
 
         provider, default_model = connect_provider(provider_name, api_key)
         self.session.harness.config.provider = provider
@@ -223,16 +138,49 @@ class TyrionApp(App[None]):
         await self.transcript_view.mount(
             MessageWidget(
                 role="system",
-                content=(
-                    f"✅ **Connected to {provider_name.capitalize()}!**\n\n"
+                text=(
+                    f"**Connected to {provider_name.capitalize()}**\n\n"
                     f"- Model: `{default_model}`\n"
-                    "- Your API key has been saved for future sessions.\n\n"
-                    "You can now start typing your prompts below!"
-                )
+                    "- Your API key was saved on this machine for future sessions.\n\n"
+                    "Start typing below."
+                ),
             )
         )
         self.transcript_view.scroll_end()
         self.prompt_input.focus()
+
+    async def show_history(self, messages: Sequence[AgentMessage]) -> None:
+        """Show a stored conversation in the transcript."""
+        self.set_chat_active(bool(messages))
+
+        # Tyrion's name goes on the first thing it says after each user message.
+        label_next = True
+        for index, msg in enumerate(messages):
+            if isinstance(msg, UserMessage):
+                await self.transcript_view.mount(MessageWidget("user", msg.content))
+                label_next = True
+            elif isinstance(msg, AssistantMessage):
+                if msg.text:
+                    await self.transcript_view.mount(
+                        MessageWidget("assistant", msg.text, show_label=label_next)
+                    )
+                    label_next = False
+                for tool_call in msg.tool_calls:
+                    result = next(
+                        (
+                            later
+                            for later in messages[index + 1 :]
+                            if isinstance(later, ToolResultMessage)
+                            and later.tool_call_id == tool_call.id
+                        ),
+                        None,
+                    )
+                    tool_widget = ToolCallWidget(tool_call.name, tool_call.arguments)
+                    if result is not None:
+                        tool_widget.set_result(result.text, result.is_error)
+                    await self.transcript_view.mount(tool_widget)
+
+        self.transcript_view.scroll_end()
 
     @work
     async def init_session(self) -> None:
@@ -240,52 +188,7 @@ class TyrionApp(App[None]):
         self.status_bar.set_status("Initializing...")
         try:
             await self.session.start()
-
-            from tyrion_agent.messages import (
-                AssistantMessage,
-                ToolResultMessage,
-                UserMessage,
-            )
-
-            messages = self.session.harness.messages
-            if messages:
-                self.set_chat_active(True)
-            else:
-                self.set_chat_active(False)
-
-            i = 0
-            while i < len(messages):
-                msg = messages[i]
-                if isinstance(msg, UserMessage):
-                    await self.transcript_view.mount(
-                        MessageWidget("user", msg.content)
-                    )
-                elif isinstance(msg, AssistantMessage):
-                    if msg.text:
-                        await self.transcript_view.mount(
-                            MessageWidget("assistant", msg.text)
-                        )
-                    for tool_call in msg.tool_calls:
-                        tool_result_msg = None
-                        for j in range(i + 1, len(messages)):
-                            if (
-                                isinstance(messages[j], ToolResultMessage)
-                                and messages[j].tool_call_id == tool_call.id
-                            ):
-                                tool_result_msg = messages[j]
-                                break
-
-                        tool_widget = ToolCallWidget(
-                            tool_call.name, tool_call.arguments
-                        )
-                        if tool_result_msg is not None:
-                            tool_widget.set_result(
-                                tool_result_msg.text, tool_result_msg.is_error
-                            )
-                        await self.transcript_view.mount(tool_widget)
-                i += 1
-
-            self.transcript_view.scroll_end()
+            await self.show_history(self.session.harness.messages)
             self.status_bar.set_status("Idle")
             self.update_token_display()
         except Exception as e:
@@ -318,7 +221,7 @@ class TyrionApp(App[None]):
                 await self.transcript_view.mount(
                     MessageWidget(
                         role="system",
-                        content=f"❌ Unknown command: `{cmd_name}`. Type `/help` for a list of commands."
+                        text=f"Unknown command `{cmd_name}`. Type `/help` for a list of commands.",
                     )
                 )
                 self.transcript_view.scroll_end()
@@ -391,55 +294,10 @@ class TyrionApp(App[None]):
 
             self.status_bar.session_id = session_id
             self.status_bar.model = target_model
-            self.status_bar._update_status()
             self.prompt_box.set_model(target_model)
             self.warn_if_unknown_model(target_model)
 
-            from tyrion_agent.messages import (
-                AssistantMessage,
-                ToolResultMessage,
-                UserMessage,
-            )
-
-            messages = self.session.harness.messages
-            if messages:
-                self.set_chat_active(True)
-            else:
-                self.set_chat_active(False)
-
-            i = 0
-            while i < len(messages):
-                msg = messages[i]
-                if isinstance(msg, UserMessage):
-                    await self.transcript_view.mount(
-                        MessageWidget("user", msg.content)
-                    )
-                elif isinstance(msg, AssistantMessage):
-                    if msg.text:
-                        await self.transcript_view.mount(
-                            MessageWidget("assistant", msg.text)
-                        )
-                    for tool_call in msg.tool_calls:
-                        tool_result_msg = None
-                        for j in range(i + 1, len(messages)):
-                            if (
-                                isinstance(messages[j], ToolResultMessage)
-                                and messages[j].tool_call_id == tool_call.id
-                            ):
-                                tool_result_msg = messages[j]
-                                break
-
-                        tool_widget = ToolCallWidget(
-                            tool_call.name, tool_call.arguments
-                        )
-                        if tool_result_msg is not None:
-                            tool_widget.set_result(
-                                tool_result_msg.text, tool_result_msg.is_error
-                            )
-                        await self.transcript_view.mount(tool_widget)
-                i += 1
-
-            self.transcript_view.scroll_end()
+            await self.show_history(self.session.harness.messages)
             self.status_bar.set_status("Idle")
             self.update_token_display()
             self.notify(f"Resumed session {session_id[:8]}...")
@@ -454,7 +312,7 @@ class TyrionApp(App[None]):
             await self.transcript_view.mount(
                 MessageWidget(
                     "system",
-                    "🧹 Context size near limit. Starting automatic compaction..."
+                    "Context is nearly full. Compacting the conversation…"
                 )
             )
             self.transcript_view.scroll_end()
@@ -466,7 +324,7 @@ class TyrionApp(App[None]):
                 await self.transcript_view.mount(
                     MessageWidget(
                         "system",
-                        "✅ Context compaction complete!"
+                        "Compaction complete."
                     )
                 )
                 self.transcript_view.scroll_end()
@@ -484,6 +342,7 @@ class TyrionApp(App[None]):
         assistant_widget: MessageWidget | None = None
         current_tool_widget: ToolCallWidget | None = None
         assistant_text = ""
+        label_next = True  # Tyrion's name goes on the first thing it says in this run
 
         try:
             async for agent_event in self.session.prompt(prompt_text):
@@ -498,7 +357,10 @@ class TyrionApp(App[None]):
                         if isinstance(inner_event, TextDeltaEvent):
                             self.thinking_indicator.visible = False
                             if assistant_widget is None:
-                                assistant_widget = MessageWidget("assistant", "")
+                                assistant_widget = MessageWidget(
+                                    "assistant", "", show_label=label_next
+                                )
+                                label_next = False
                                 await self.transcript_view.mount(assistant_widget)
                             assistant_text += inner_event.delta
                             assistant_widget.update_content(assistant_text)
@@ -512,7 +374,7 @@ class TyrionApp(App[None]):
                         if getattr(agent_event.message, "stop_reason", None) == "error":
                             error_text = agent_event.message.error_message or "Unknown API error"
                             await self.transcript_view.mount(
-                                MessageWidget("error", f"❌ API Error: {error_text}")
+                                MessageWidget("error", f"API Error: {error_text}")
                             )
                         assistant_widget = None
                         assistant_text = ""
@@ -521,7 +383,7 @@ class TyrionApp(App[None]):
                 elif isinstance(agent_event, ToolExecutionStartEvent):
                     self.thinking_indicator.visible = False
                     current_tool_widget = ToolCallWidget(
-                        agent_event.tool_name, agent_event.args
+                        agent_event.tool_name, agent_event.args, live=True
                     )
                     await self.transcript_view.mount(current_tool_widget)
                     self.transcript_view.scroll_end()
@@ -532,11 +394,12 @@ class TyrionApp(App[None]):
                             agent_event.result.text, agent_event.is_error
                         )
                     current_tool_widget = None
+                    self.thinking_indicator.visible = True  # the model reads the result next
                     self.transcript_view.scroll_end()
 
         except Exception as e:
             await self.transcript_view.mount(
-                MessageWidget("error", f"💥 App Error: {str(e)}")
+                MessageWidget("error", f"App Error: {e}")
             )
             self.transcript_view.scroll_end()
         finally:

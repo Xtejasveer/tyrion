@@ -51,7 +51,7 @@ async def handle_help(app: TyrionApp, args: list[str]) -> None:
     from tyrion_coding.tui.widgets import MessageWidget
     help_widget = MessageWidget(
         role="system",
-        content="### Available Commands\n\n" + "\n".join(f"- {line}" for line in lines),
+        text="### Available Commands\n\n" + "\n".join(f"- {line}" for line in lines),
     )
     await app.transcript_view.mount(help_widget)
     app.transcript_view.scroll_end()
@@ -74,7 +74,7 @@ async def handle_model(app: TyrionApp, args: list[str]) -> None:
         active_model = app.session.harness.config.model
         msg_widget = MessageWidget(
             role="system",
-            content=f"Active model: `{active_model}`\n\nUsage: `/model <name>`"
+            text=f"Active model: `{active_model}`\n\nUsage: `/model <name>`"
         )
         await app.transcript_view.mount(msg_widget)
     else:
@@ -94,12 +94,12 @@ async def handle_model(app: TyrionApp, args: list[str]) -> None:
 
             msg_widget = MessageWidget(
                 role="system",
-                content=f"Switched provider/model to `{new_model}`"
+                text=f"Switched provider/model to `{new_model}`"
             )
         except Exception as exc:
             msg_widget = MessageWidget(
-                role="system",
-                content=f"❌ Failed to switch to model `{new_model}`: {exc}"
+                role="error",
+                text=f"Failed to switch to model {new_model}: {exc}"
             )
 
         await app.transcript_view.mount(msg_widget)
@@ -124,7 +124,7 @@ async def handle_compact(app: TyrionApp, args: list[str]) -> None:
     if len(app.session.harness.messages) <= 6:
         msg_widget = MessageWidget(
             role="system",
-            content="⚠️ Not enough messages to compact (requires at least 7 messages)."
+            text="Not enough messages to compact yet (needs at least 7)."
         )
         await app.transcript_view.mount(msg_widget)
         app.transcript_view.scroll_end()
@@ -132,7 +132,7 @@ async def handle_compact(app: TyrionApp, args: list[str]) -> None:
 
     msg_widget = MessageWidget(
         role="system",
-        content="🧹 Manually compacting context..."
+        text="Compacting the conversation…"
     )
     await app.transcript_view.mount(msg_widget)
     app.transcript_view.scroll_end()
@@ -145,13 +145,13 @@ async def handle_compact(app: TyrionApp, args: list[str]) -> None:
 
         success_widget = MessageWidget(
             role="system",
-            content="✅ Compaction complete!"
+            text="Compaction complete."
         )
         await app.transcript_view.mount(success_widget)
     except Exception as exc:
         error_widget = MessageWidget(
-            role="system",
-            content=f"❌ Compaction failed: {exc}"
+            role="error",
+            text=f"Compaction failed: {exc}"
         )
         await app.transcript_view.mount(error_widget)
 

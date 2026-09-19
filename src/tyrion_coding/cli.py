@@ -100,10 +100,7 @@ async def _run_agent(
         )
 
     renderer = PrintRenderer()
-    renderer.console.print(
-        f"[dim]Model: {model} | cwd: {cwd} | session: {session.session_id}[/dim]"
-    )
-    renderer.console.print(f"[dim]{'─' * 50}[/dim]")
+    renderer.header(model, cwd, session.session_id)
     async for event in session.prompt(prompt):
         renderer.handle_event(event)
 

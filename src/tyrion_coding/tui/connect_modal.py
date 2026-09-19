@@ -1,93 +1,116 @@
 from __future__ import annotations
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select
 
+from tyrion_coding import theme
+from tyrion_coding.tui.styles import css
+
 
 class ConnectModal(ModalScreen[tuple[str, str] | None]):
     """Modal screen allowing the user to choose a model provider and enter their API key."""
 
-    CSS = """
+    CSS = css("""
     ConnectModal {
         align: center middle;
-        background: rgba(0, 0, 0, 0.7);
+        background: %BG_DEEP% 75%;
     }
 
     #connect-dialog {
-        width: 66;
+        width: 62;
         height: auto;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
+        background: transparent;
+        border: round %GOLD_DIM%;
+    }
+
+    #connect-body {
+        height: auto;
+        background: %SURFACE%;
+        padding: 1 3;
     }
 
     #connect-title {
-        text-align: center;
         width: 100%;
-        margin-bottom: 1;
         text-style: bold;
-        color: $primary;
+        color: %GOLD%;
+    }
+
+    #connect-subtitle {
+        width: 100%;
+        color: %MUTED%;
+        margin-bottom: 1;
     }
 
     .section-label {
         margin-top: 1;
-        margin-bottom: 0;
+        color: %FAINT%;
         text-style: bold;
-        color: $text;
     }
 
     #provider-select {
-        margin-bottom: 1;
         width: 100%;
     }
 
     #key-input {
-        margin-bottom: 1;
-        border: tall $primary;
         width: 100%;
+        background: %BG%;
+        border: round %BORDER_STRONG%;
+    }
+
+    #key-input:focus {
+        border: round %GOLD%;
     }
 
     #connect-btn {
         width: 100%;
-        margin-top: 1;
-        margin-bottom: 1;
+        margin-top: 2;
     }
 
     #connect-footer {
-        text-align: center;
         width: 100%;
-        color: $text-muted;
+        margin-top: 1;
+        content-align: center middle;
     }
-    """
+    """)
 
     def __init__(self) -> None:
         super().__init__()
         self._selected_provider = "openrouter"
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="connect-dialog"):
-            yield Label("⚡ Connect Model Provider", id="connect-title")
-            yield Label("1. Select Provider:", classes="section-label")
+        with Vertical(id="connect-dialog"), Vertical(id="connect-body"):
+            yield Label("◆ Connect a provider", id="connect-title")
+            yield Label(
+                "Add an API key to start chatting. It is saved on this machine.",
+                id="connect-subtitle",
+            )
+            yield Label("PROVIDER", classes="section-label")
             yield Select(
                 options=[
-                    ("OpenRouter (Claude, GPT-4, Gemini, Llama)", "openrouter"),
-                    ("OpenAI Direct", "openai"),
+                    ("OpenRouter · Claude, GPT-4, Gemini, Llama", "openrouter"),
+                    ("OpenAI direct", "openai"),
                     ("DeepSeek", "deepseek"),
                 ],
                 value="openrouter",
                 allow_blank=False,
                 id="provider-select",
             )
-            yield Label("2. Enter API Key:", classes="section-label")
+            yield Label("API KEY", classes="section-label")
             yield Input(
-                placeholder="Paste your API key here (e.g. sk-or-v1-...)",
+                placeholder="Paste your key here (e.g. sk-or-v1-…)",
+                password=True,
                 id="key-input",
             )
-            yield Button("Connect & Start Chatting", variant="primary", id="connect-btn")
+            yield Button("Connect", variant="primary", id="connect-btn")
             yield Label(
-                "Press Enter in key box to Connect | Escape to Cancel",
+                Text.assemble(
+                    ("enter", f"bold {theme.GOLD}"), (" connect", theme.MUTED),
+                    ("     ", ""),
+                    ("esc", f"bold {theme.GOLD}"), (" cancel", theme.MUTED),
+                ),
                 id="connect-footer",
             )
 
