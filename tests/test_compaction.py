@@ -92,6 +92,25 @@ def test_a_second_compaction_replaces_the_first_summary() -> None:
     assert all("FIRST" not in content for content in _contents(state))
 
 
+def test_compaction_clears_stale_token_counts_on_kept_messages() -> None:
+    # The kept reply's counts describe the long prompt from BEFORE compaction, so
+    # they must not be used. A reply made after the compaction keeps its counts.
+    usage = {"prompt_tokens": 90_000, "completion_tokens": 10, "total_tokens": 90_010}
+    entries = _chain(
+        SessionInfoEntry(id="root", session_id="s"),
+        _msg("m1"),
+        MessageEntry(id="old-reply", message=AssistantMessage(content="a", usage=usage)),
+        CompactionEntry(id="c1", summary="SUMMARY", replaced_entry_ids=["m1"]),
+        MessageEntry(id="new-reply", message=AssistantMessage(content="b", usage=usage)),
+    )
+
+    state = reconstruct_state(entries)
+
+    by_id = dict(zip(state.message_entry_ids, state.messages))
+    assert by_id["old-reply"].usage == {}
+    assert by_id["new-reply"].usage == usage
+
+
 def test_split_never_leaves_a_tool_result_without_its_tool_call() -> None:
     messages = [
         UserMessage(content="u1"),

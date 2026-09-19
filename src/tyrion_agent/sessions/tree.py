@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from tyrion_agent.messages import AgentMessage, UserMessage
+from tyrion_agent.messages import AgentMessage, AssistantMessage, UserMessage
 from tyrion_agent.sessions.entries import (
     CompactionEntry,
     LeafEntry,
@@ -30,6 +30,17 @@ class SessionState:
     # Log entry id behind each item in `messages` (same length, same order).
     # A compaction summary is identified by its CompactionEntry id.
     message_entry_ids: list[str] = field(default_factory=list)
+
+
+def _without_usage(message: AgentMessage) -> AgentMessage:
+    """Drop the API token counts from an assistant message.
+
+    Those counts described the prompt as it was before a compaction shortened it,
+    so they no longer say how big the context is.
+    """
+    if isinstance(message, AssistantMessage) and message.usage:
+        return message.model_copy(update={"usage": {}})
+    return message
 
 
 def index_entries(entries: Sequence[SessionEntry]) -> dict[str, SessionEntry]:
@@ -102,7 +113,11 @@ def reconstruct_state(
             # The summary stands in for the messages it replaced: drop those
             # and put the summary first, ahead of the messages that were kept.
             replaced = set(entry.replaced_entry_ids)
-            kept = [(entry_id, msg) for entry_id, msg in pairs if entry_id not in replaced]
+            kept = [
+                (entry_id, _without_usage(msg))
+                for entry_id, msg in pairs
+                if entry_id not in replaced
+            ]
             summary = UserMessage(
                 content=(
                     "System Notification: The preceding conversation history "

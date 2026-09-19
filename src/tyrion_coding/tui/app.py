@@ -171,6 +171,7 @@ class TyrionApp(App[None]):
         self.prompt_input.focus()
         self.init_session()
         self.check_initial_auth()
+        self.warn_if_unknown_model(self.session.harness.config.model)
 
     def check_initial_auth(self) -> None:
         """If unauthenticated on startup, automatically open ConnectModal."""
@@ -331,17 +332,17 @@ class TyrionApp(App[None]):
 
     def update_token_display(self) -> None:
         """Recalculate current session tokens and update status bar."""
-        from tyrion_ai.model_limits import get_context_window
-        from tyrion_coding.context_window import estimate_session_tokens
+        self.status_bar.set_tokens(
+            self.session.context_tokens(), self.session.context_limit()
+        )
 
-        system_prompt = self.session.harness.config.system
-        messages = list(self.session.harness.messages)
-        model = self.session.harness.config.model
+    def warn_if_unknown_model(self, model: str) -> None:
+        """Tell the user when we have no context-window data for the model."""
+        from tyrion_coding.context_window import unknown_model_notice
 
-        tokens = estimate_session_tokens(system_prompt, messages)
-        limit = get_context_window(model)
-
-        self.status_bar.set_tokens(tokens, limit)
+        notice = unknown_model_notice(model)
+        if notice:
+            self.notify(notice, severity="warning", timeout=12)
 
     @work
     async def run_resume_worker(self, session_id: str) -> None:
@@ -377,6 +378,7 @@ class TyrionApp(App[None]):
             self.status_bar.model = target_model
             self.status_bar._update_status()
             self.prompt_box.set_model(target_model)
+            self.warn_if_unknown_model(target_model)
 
             from tyrion_agent.messages import (
                 AssistantMessage,

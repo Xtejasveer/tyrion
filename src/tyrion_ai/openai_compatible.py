@@ -36,6 +36,20 @@ def _is_cancelled(signal: object | None) -> bool:
     return bool(is_cancelled()) if callable(is_cancelled) else False
 
 
+_USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
+
+
+def _token_usage(usage: dict[str, Any] | None) -> dict[str, int]:
+    """Keep just the integer token counts from an API `usage` object."""
+    if not usage:
+        return {}
+    return {
+        key: usage[key]
+        for key in _USAGE_FIELDS
+        if isinstance(usage.get(key), int) and not isinstance(usage[key], bool)
+    }
+
+
 class OpenAICompatibleProvider:
     """Provider for OpenAI-compatible /chat/completions APIs."""
 
@@ -46,6 +60,9 @@ class OpenAICompatibleProvider:
             api_key=config.api_key,
             timeout_seconds=config.timeout_seconds
         )
+        # Ask the server to report real token usage. Switched off for good if
+        # this server turns out not to understand the option.
+        self._include_usage = True
     def stream_response(
             self,
             *,
@@ -73,6 +90,7 @@ class OpenAICompatibleProvider:
         payload = self._build_payload(model, system, messages, tools)
 
         # 2. Make the streaming HTTP request
+        retry_without_usage = False
         try:
             async with self._client.stream(
                 "POST",
@@ -81,18 +99,30 @@ class OpenAICompatibleProvider:
             ) as response:
                 if response.status_code != 200:
                     body = await response.aread()
-                    error_msg = f"API error {response.status_code} : {body.decode()}"
-                    yield AssistantErrorEvent(
-                        error = AssistantMessage(
-                            model = model,
-                            content = [],
-                            stop_reason= "error",
-                            error_message = error_msg,
+                    if (
+                        self._include_usage
+                        and response.status_code in (400, 422)
+                        and b"stream_options" in body
+                    ):
+                        # This server rejects `stream_options`. Remember that
+                        # and repeat the request without it (below, once this
+                        # response is closed).
+                        self._include_usage = False
+                        retry_without_usage = True
+                    else:
+                        error_msg = f"API error {response.status_code} : {body.decode()}"
+                        yield AssistantErrorEvent(
+                            error = AssistantMessage(
+                                model = model,
+                                content = [],
+                                stop_reason= "error",
+                                error_message = error_msg,
+                            )
                         )
-                    )
-                    return
-                async for event in self._parse_sse_stream(response, model, signal):
-                    yield event
+                        return
+                else:
+                    async for event in self._parse_sse_stream(response, model, signal):
+                        yield event
 
         except httpx.HTTPError as exc:
             yield AssistantErrorEvent(
@@ -103,6 +133,10 @@ class OpenAICompatibleProvider:
                     error_message=f"HTTP error: {exc}",
                 )
             )
+
+        if retry_without_usage:
+            async for event in self._stream(model, system, messages, tools, signal):
+                yield event
 
     ## Converting our types into OpenAI JSON format
 
@@ -159,6 +193,9 @@ class OpenAICompatibleProvider:
             "messages" :openai_messages,
             "stream" :True,
         }
+        if self._include_usage:
+            # Adds one final chunk to the stream carrying the real token counts.
+            payload["stream_options"] = {"include_usage": True}
 
         if tools:
              
@@ -192,10 +229,14 @@ class OpenAICompatibleProvider:
         text_so_far = ""
         tool_calls_so_far : dict[int, dict[str, Any]] = {}
         started = False
+        finish_reason: str | None = None
+        usage: dict[str, Any] = {}
 
         async for line in response.aiter_lines():
             # Stop reading (and close the connection) as soon as the user cancels.
-            if _is_cancelled(signal):
+            # Once the model has finished we are only waiting for the usage chunk,
+            # so a cancel no longer applies.
+            if finish_reason is None and _is_cancelled(signal):
                 yield AssistantErrorEvent(
                     error=self._build_aborted(model, text_so_far)
                 )
@@ -214,6 +255,12 @@ class OpenAICompatibleProvider:
             except json.JSONDecodeError:
                 continue
 
+            # With include_usage the server sends the real token counts in the
+            # last chunk, which has no `choices`, so read it before the check below.
+            chunk_usage = chunk.get("usage")
+            if isinstance(chunk_usage, dict):
+                usage = chunk_usage
+
             #Extract the delta from the chunk
             choices = chunk.get("choices", [])
             if not choices:
@@ -221,7 +268,8 @@ class OpenAICompatibleProvider:
 
             choice = choices[0]
             delta = choice.get("delta", {})
-            finish_reason = choice.get("finish_reason")
+            if choice.get("finish_reason") is not None:
+                finish_reason = choice["finish_reason"]
 
             # --- Build the partial message for events ---
             if "content" in delta and delta["content"]:
@@ -285,46 +333,36 @@ class OpenAICompatibleProvider:
                             ),
                             partial=partial,
                         )
-            # Finish — emit end events for tool calls and the final message
-            if finish_reason is not None:
-                if not started:
-                    # The model finished without producing any text or tool calls.
-                    yield AssistantErrorEvent(
-                        error=AssistantMessage(
-                            model=model,
-                            content=[],
-                            stop_reason="error",
-                            error_message="Provider returned an empty response",
-                        )
-                    )
-                    return
 
-                final = self._build_final(model, text_so_far, tool_calls_so_far, finish_reason)
-
-                for tc_data in tool_calls_so_far.values():
-                    args = self._safe_parse_arguments(tc_data["arguments"])
-                    yield ToolCallEndEvent(
-                        tool_call=ToolCall(
-                            id = tc_data["id"],
-                            name = tc_data["name"],
-                            arguments=args,
-                        ),
-                        partial=final
-                    )
-                yield AssistantDoneEvent(message = final)
-                return 
-        if started:
-            final = self._build_final(model, text_so_far, tool_calls_so_far, "stop")
-            yield AssistantDoneEvent(message=final)
-        else:
+        # The stream is over ([DONE] or the server closed it). We keep reading
+        # past `finish_reason` so the trailing usage chunk is not missed.
+        if not started:
+            # The model produced no text and no tool calls.
             yield AssistantErrorEvent(
                 error = AssistantMessage(
                     model = model,
                     content =[],
                     stop_reason="error",
-                    error_message = "Provider returned empty reponse",                    
+                    error_message = "Provider returned an empty response",
                 )
             )
+            return
+
+        final = self._build_final(
+            model, text_so_far, tool_calls_so_far, finish_reason or "stop", usage
+        )
+        for tc_data in tool_calls_so_far.values():
+            args = self._safe_parse_arguments(tc_data["arguments"])
+            yield ToolCallEndEvent(
+                tool_call=ToolCall(
+                    id = tc_data["id"],
+                    name = tc_data["name"],
+                    arguments=args,
+                ),
+                partial=final
+            )
+        yield AssistantDoneEvent(message = final)
+
     ## helpers:
 
     def _build_aborted(self, model: str, text: str) -> AssistantMessage:
@@ -363,6 +401,7 @@ class OpenAICompatibleProvider:
             text: str,
             tool_calls: dict[int, dict[str, Any]],
             finish_reason: str,
+            usage: dict[str, Any] | None = None,
     ) -> AssistantMessage:
         """Build the final AssistantMessage."""
         content : list[TextContent | ToolCall] = []
@@ -379,7 +418,8 @@ class OpenAICompatibleProvider:
         return AssistantMessage(
             model=model,
             content = content,
-            stop_reason=stop_reason
+            stop_reason=stop_reason,
+            usage=_token_usage(usage),
         )
     def _safe_parse_arguments(self, raw: str) -> dict[str, Any]:
         """Parse JSON arguments string, returning empty dict on failure."""

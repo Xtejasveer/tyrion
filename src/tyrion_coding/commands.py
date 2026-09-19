@@ -85,6 +85,7 @@ async def handle_model(app: TyrionApp, args: list[str]) -> None:
             app.status_bar.model = new_model
             app.prompt_box.set_model(new_model)
             app.update_token_display()
+            app.warn_if_unknown_model(new_model)
 
             msg_widget = MessageWidget(
                 role="system",

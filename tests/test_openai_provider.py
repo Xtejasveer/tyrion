@@ -27,12 +27,7 @@ def _chunk(delta: dict, finish_reason: str | None = None) -> dict:
     return {"choices": [{"delta": delta, "finish_reason": finish_reason}]}
 
 
-def _provider(body: bytes, requests: list | None = None) -> OpenAICompatibleProvider:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if requests is not None:
-            requests.append(request)
-        return httpx.Response(200, content=body)
-
+def _provider_with_handler(handler) -> OpenAICompatibleProvider:
     provider = OpenAICompatibleProvider(
         OpenAICompatibleConfig(api_key="test-key", base_url="http://test")
     )
@@ -40,6 +35,15 @@ def _provider(body: bytes, requests: list | None = None) -> OpenAICompatibleProv
         base_url="http://test", transport=httpx.MockTransport(handler)
     )
     return provider
+
+
+def _provider(body: bytes, requests: list | None = None) -> OpenAICompatibleProvider:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if requests is not None:
+            requests.append(request)
+        return httpx.Response(200, content=body)
+
+    return _provider_with_handler(handler)
 
 
 async def _collect(provider: OpenAICompatibleProvider, signal=None) -> list:
@@ -168,6 +172,152 @@ async def test_already_cancelled_run_makes_no_request() -> None:
     assert requests == []
     assert len(events) == 1
     assert events[0].error.stop_reason == "aborted"
+
+
+# --- real token usage --------------------------------------------------------
+
+USAGE = {
+    "prompt_tokens": 1234,
+    "completion_tokens": 56,
+    "total_tokens": 1290,
+    "prompt_tokens_details": {"cached_tokens": 1000},  # nested: not kept
+}
+
+
+@pytest.mark.asyncio
+async def test_request_asks_the_server_to_report_usage() -> None:
+    requests: list = []
+    provider = _provider(_sse(_chunk({"content": "hi"}, "stop")), requests)
+
+    await _collect(provider)
+
+    assert json.loads(requests[0].content)["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.asyncio
+async def test_usage_from_the_trailing_chunk_is_stored_on_the_message() -> None:
+    # The usage chunk comes AFTER the finish_reason chunk and has no choices.
+    provider = _provider(
+        _sse(
+            _chunk({"content": "hi"}),
+            _chunk({}, "stop"),
+            {"choices": [], "usage": USAGE},
+        )
+    )
+
+    events = await _collect(provider)
+
+    done = events[-1]
+    assert isinstance(done, AssistantDoneEvent)
+    assert done.message.text == "hi"
+    assert done.message.usage == {
+        "prompt_tokens": 1234,
+        "completion_tokens": 56,
+        "total_tokens": 1290,
+    }
+
+
+@pytest.mark.asyncio
+async def test_usage_is_read_for_tool_call_replies_too() -> None:
+    provider = _provider(
+        _sse(
+            _chunk(
+                {
+                    "tool_calls": [
+                        {"index": 0, "id": "c1", "function": {"name": "read", "arguments": "{}"}}
+                    ]
+                }
+            ),
+            _chunk({}, "tool_calls"),
+            {"choices": [], "usage": USAGE},
+        )
+    )
+
+    events = await _collect(provider)
+
+    done = events[-1]
+    assert done.message.stop_reason == "toolUse"
+    assert done.message.usage["prompt_tokens"] == 1234
+
+
+@pytest.mark.asyncio
+async def test_missing_usage_leaves_it_empty() -> None:
+    provider = _provider(_sse(_chunk({"content": "hi"}, "stop")))
+
+    events = await _collect(provider)
+
+    assert events[-1].message.usage == {}
+
+
+@pytest.mark.asyncio
+async def test_server_that_rejects_stream_options_is_retried_without_it() -> None:
+    requests: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if "stream_options" in requests[-1]:
+            return httpx.Response(
+                400, json={"error": {"message": "Unrecognized request argument: stream_options"}}
+            )
+        return httpx.Response(200, content=_sse(_chunk({"content": "hi"}, "stop")))
+
+    provider = _provider_with_handler(handler)
+
+    events = await _collect(provider)
+
+    assert isinstance(events[-1], AssistantDoneEvent)
+    assert events[-1].message.text == "hi"
+    assert len(requests) == 2
+    assert "stream_options" not in requests[1]
+
+    # It remembers, so later requests do not fail first.
+    await _collect(provider)
+    assert len(requests) == 3
+    assert "stream_options" not in requests[2]
+
+
+@pytest.mark.asyncio
+async def test_an_unrelated_400_is_reported_not_retried() -> None:
+    requests: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(400, json={"error": {"message": "invalid model"}})
+
+    events = await _collect(_provider_with_handler(handler))
+
+    assert len(requests) == 1
+    assert isinstance(events[-1], AssistantErrorEvent)
+    assert "invalid model" in (events[-1].error.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_cancelling_after_the_model_finished_does_not_discard_the_reply() -> None:
+    # Once finish_reason has arrived we are only waiting for the usage chunk, so
+    # a late cancel must not turn a complete reply into an aborted one.
+    token = SimpleCancellationToken()
+    provider = _provider(
+        _sse(
+            _chunk({"content": "done"}, "stop"),  # text and finish in one chunk
+            {"choices": [], "usage": USAGE},
+        )
+    )
+
+    events = []
+    async for event in provider.stream_response(
+        model="m",
+        system="s",
+        messages=[UserMessage(content="hi")],
+        tools=[],
+        signal=token,
+    ):
+        events.append(event)
+        if isinstance(event, TextDeltaEvent):
+            token.cancel()  # the model has already finished at this point
+
+    assert isinstance(events[-1], AssistantDoneEvent)
+    assert events[-1].message.text == "done"
+    assert events[-1].message.usage["prompt_tokens"] == 1234
 
 
 # --- replaying the transcript ------------------------------------------------

@@ -19,6 +19,8 @@ from tyrion_agent.sessions.entries import (
 from tyrion_agent.sessions.jsonl import JsonlSessionStorage
 from tyrion_agent.sessions.tree import reconstruct_state
 from tyrion_agent.tools import AgentTool
+from tyrion_ai.model_limits import get_context_window
+from tyrion_coding.context_window import estimate_context_tokens
 from tyrion_coding.system_prompt import assemble_system_prompt
 from tyrion_coding.tools import create_coding_tools
 
@@ -158,19 +160,21 @@ class CodingSession:
         await self.storage.append(entry)
         self._parent_id = entry.id
 
+    def context_tokens(self) -> int:
+        """Tokens the next request will take: real API counts where known, else estimated."""
+        return estimate_context_tokens(
+            self.harness.config.system,
+            list(self.harness.messages),
+            self.harness.config.tools,
+        )
+
+    def context_limit(self) -> int:
+        """Context window size of the current model."""
+        return get_context_window(self.harness.config.model)
+
     def needs_compaction(self, threshold: float = 0.80) -> bool:
         """Check if the session token count exceeds the threshold fraction of context window."""
-        from tyrion_ai.model_limits import get_context_window
-        from tyrion_coding.context_window import estimate_session_tokens
-
-        system_prompt = self.harness.config.system
-        messages = list(self.harness.messages)
-        model = self.harness.config.model
-
-        current_tokens = estimate_session_tokens(system_prompt, messages)
-        limit = get_context_window(model)
-
-        return current_tokens >= (threshold * limit)
+        return self.context_tokens() >= threshold * self.context_limit()
 
     async def compact(self) -> None:
         """Replace the oldest part of the transcript with a model-written summary.

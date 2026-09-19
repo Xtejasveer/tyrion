@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 from tyrion_ai.env import OpenAICompatibleConfig
+from tyrion_ai.model_limits import get_limits
 from tyrion_ai.openai_compatible import OpenAICompatibleProvider
 from tyrion_coding.provider_catalog import (
     PROVIDER_CATALOG,
@@ -46,7 +47,8 @@ def resolve_model_and_provider(model_name: str) -> tuple[ProviderMeta, ModelMeta
 
     # Fallback to OpenAI if not mapped
     openai_prov = PROVIDER_CATALOG["openai"]
-    fallback_model = ModelMeta(model_name, 128000, 4096)
+    limits = get_limits(model_name)
+    fallback_model = ModelMeta(model_name, limits.context_window, limits.max_output_tokens)
     return openai_prov, fallback_model
 
 
