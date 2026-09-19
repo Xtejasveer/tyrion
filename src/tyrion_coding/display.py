@@ -67,6 +67,11 @@ def truncate_left(text: str, width: int) -> str:
     return "…" + text[-(width - 1) :] if width > 1 else text[-width:]
 
 
+def one_line(text: str, limit: int = 100) -> str:
+    """Flatten text to a single line (newlines and runs of spaces become one space) and cut it."""
+    return truncate(" ".join(text.split()), limit)
+
+
 def tool_summary(name: str, args: Mapping[str, JSONValue], width: int = 80) -> str:
     """One line describing what a tool call is doing, e.g. the path or the command."""
     path = args.get("path")

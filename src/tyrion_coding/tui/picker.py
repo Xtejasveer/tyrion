@@ -16,20 +16,28 @@ from tyrion_coding.session_coding import SessionManager, SessionMeta
 from tyrion_coding.tui.styles import css
 
 
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
 def _row(meta: SessionMeta) -> Text:
-    """One session as a single line: when, which model, how much, and its id."""
-    empty = meta.message_count == 0
-    stamp = meta.created_at.astimezone().strftime("%b %d  %H:%M") if meta.created_at else "unknown date"
-    count = "empty" if empty else f"{meta.message_count} messages"
-    return Text.assemble(
-        (stamp, theme.FAINT if empty else theme.TEXT),
-        ("   ", ""),
-        (meta.model or "unknown model", theme.FAINT if empty else theme.GOLD_SOFT),
-        ("   ", ""),
-        (count, theme.FAINT),
-        ("   ", ""),
-        (meta.session_id[:8], theme.FAINT),
-    )
+    """One session as a two-line entry plus a spacer: what it was about, then when, which model, and how long.
+
+    The title is the session's name if it has one, otherwise the first thing
+    the user asked. The session id is deliberately not shown: it says nothing
+    about the chat.
+    """
+    stamp = meta.created_at.astimezone().strftime("%b %d · %H:%M") if meta.created_at else "unknown date"
+    row = Text(no_wrap=True, overflow="ellipsis")
+    row.append(meta.name or meta.title or "Untitled session", style=f"bold {theme.TEXT}")
+    row.append("\n")
+    row.append(stamp, style=theme.MUTED)
+    row.append("   ")
+    row.append(meta.model or "unknown model", style=theme.GOLD_SOFT)
+    row.append("   ")
+    row.append(_plural(meta.message_count, "message"), style=theme.MUTED)
+    row.append("\n ")  # a spacer line, so neighbouring sessions do not run together
+    return row
 
 
 class SessionPickerModal(ModalScreen[str | None]):
@@ -42,10 +50,10 @@ class SessionPickerModal(ModalScreen[str | None]):
     }
 
     #picker-dialog {
-        width: 86;
+        width: 92;
         max-width: 96%;
         height: auto;
-        max-height: 80%;
+        max-height: 88%;
         background: transparent;
         border: round %GOLD_DIM%;
     }
@@ -65,7 +73,7 @@ class SessionPickerModal(ModalScreen[str | None]):
 
     #session-list {
         height: auto;
-        max-height: 20;
+        max-height: 26;
         background: transparent;
         border: none;
         padding: 0;
@@ -73,7 +81,7 @@ class SessionPickerModal(ModalScreen[str | None]):
 
     #session-list > .option-list--option-highlighted {
         background: %GOLD_TINT%;
-        text-style: bold;
+        text-style: none;
     }
 
     #picker-footer {
@@ -107,21 +115,24 @@ class SessionPickerModal(ModalScreen[str | None]):
             key=lambda meta: meta.created_at or oldest,
             reverse=True,
         )
-        # Sessions with something in them first; the empty ones (nothing to resume) last.
-        sessions = [m for m in newest_first if m.message_count] + [
-            m for m in newest_first if not m.message_count
-        ]
+        # A session with no messages is just a launch that was closed without
+        # chatting. There is nothing to resume, so fold those into one note.
+        sessions = [meta for meta in newest_first if meta.message_count]
+        empty_count = len(newest_first) - len(sessions)
 
         if not sessions:
             option_list.add_option(
                 Option(Text("No saved sessions yet", style=theme.FAINT), id="none", disabled=True)
             )
-            return
-
         for meta in sessions:
             option_list.add_option(Option(_row(meta), id=meta.session_id))
-        option_list.highlighted = 0  # the newest session is ready: Enter resumes it
-        option_list.focus()
+        if empty_count:
+            note = f"{_plural(empty_count, 'empty session')} hidden"
+            option_list.add_option(Option(Text(note, style=theme.FAINT), id="hidden", disabled=True))
+
+        if sessions:
+            option_list.highlighted = 0  # the newest session is ready: Enter resumes it
+            option_list.focus()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle selecting an option."""

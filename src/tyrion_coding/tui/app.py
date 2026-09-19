@@ -20,7 +20,8 @@ from tyrion_agent.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from tyrion_coding.session_coding import SessionManager
+from tyrion_coding.display import truncate
+from tyrion_coding.session_coding import SessionManager, first_prompt
 from tyrion_coding.theme import RICH_THEME
 from tyrion_coding.tui.styles import APP_CSS, TYRION_THEME
 from tyrion_coding.tui.welcome import WelcomeHeader, WelcomeHints, WelcomeTip
@@ -300,7 +301,8 @@ class TyrionApp(App[None]):
             await self.show_history(self.session.harness.messages)
             self.status_bar.set_status("Idle")
             self.update_token_display()
-            self.notify(f"Resumed session {session_id[:8]}...")
+            title = first_prompt(state.entries)
+            self.notify(f"Resumed: {truncate(title, 70)}" if title else f"Resumed session {session_id[:8]}")
         except Exception as e:
             self.status_bar.set_status("Error")
             self.notify(f"Failed to resume session: {e}", severity="error")
