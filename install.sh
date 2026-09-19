@@ -14,9 +14,10 @@
 # It never uses sudo and only writes inside your home directory.
 #
 # Options (environment variables):
-#   TYRION_VERSION   install a specific release, for example TYRION_VERSION=0.1.0
-#   TYRION_SOURCE    install from somewhere else: a PyPI name, a URL, or a local folder
-#   TYRION_DRY_RUN=1 show what would be done and exit without changing anything
+#   TYRION_VERSION      install a specific release, for example TYRION_VERSION=0.1.0
+#   TYRION_FROM_PYPI=0  install the latest development version from GitHub instead of a release
+#   TYRION_SOURCE       install from somewhere else: a PyPI name, a URL, or a local folder
+#   TYRION_DRY_RUN=1    show what would be done and exit without changing anything
 #
 # Update:     run this script again
 # Uninstall:  uv tool uninstall tyrion-cli    (your ~/.tyrion data is left alone)
@@ -28,9 +29,9 @@ PACKAGE="tyrion-cli"
 PYTHON_VERSION="3.12"
 UV_INSTALLER_URL="https://astral.sh/uv/install.sh"
 
-# Until the first release is on PyPI, install from the GitHub source archive. After
-# publishing, change the default below to 1 and this installs the released package.
-INSTALL_FROM_PYPI="${TYRION_FROM_PYPI:-0}"
+# By default this installs the latest release from PyPI. Set TYRION_FROM_PYPI=0 to install
+# the current development version from the GitHub source archive instead.
+INSTALL_FROM_PYPI="${TYRION_FROM_PYPI:-1}"
 
 if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ]; then
     GOLD='\033[1;33m'

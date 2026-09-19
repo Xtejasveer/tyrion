@@ -117,24 +117,29 @@ def test_the_installer_stops_on_errors_and_unset_variables() -> None:
     assert "set -eu" in INSTALL_SH.read_text(encoding="utf-8")
 
 
-def test_by_default_it_installs_from_github_without_needing_git() -> None:
+def test_by_default_it_installs_the_latest_release_from_pypi() -> None:
     result = _run_installer()
 
     assert result.returncode == 0, result.stderr
+    assert "source  : tyrion-cli\n" in result.stdout
+    assert "github.com" not in result.stdout
+
+
+def test_a_version_pins_to_that_release_on_pypi() -> None:
+    result = _run_installer(env_extra={"TYRION_VERSION": "0.1.0"})
+    assert "source  : tyrion-cli==0.1.0\n" in result.stdout
+
+
+def test_the_development_version_installs_from_github_without_needing_git() -> None:
+    result = _run_installer(env_extra={"TYRION_FROM_PYPI": "0"})
+
     assert "https://github.com/Xtejasveer/tyrion/archive/refs/heads/main.tar.gz" in result.stdout
     assert "git+" not in result.stdout  # a source archive, so users do not need git
 
 
-def test_a_version_pins_to_that_release_tag() -> None:
-    result = _run_installer(env_extra={"TYRION_VERSION": "0.1.0"})
+def test_a_github_version_pins_to_that_release_tag() -> None:
+    result = _run_installer(env_extra={"TYRION_FROM_PYPI": "0", "TYRION_VERSION": "0.1.0"})
     assert "archive/refs/tags/v0.1.0.tar.gz" in result.stdout
-
-
-def test_once_published_it_can_install_the_pypi_package() -> None:
-    latest = _run_installer(env_extra={"TYRION_FROM_PYPI": "1"})
-    pinned = _run_installer(env_extra={"TYRION_FROM_PYPI": "1", "TYRION_VERSION": "0.2.0"})
-    assert "source  : tyrion-cli\n" in latest.stdout
-    assert "source  : tyrion-cli==0.2.0\n" in pinned.stdout
 
 
 def test_an_explicit_source_beats_everything() -> None:

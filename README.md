@@ -6,6 +6,7 @@
 
 *A powerful, transparent, and responsive AI coding companion built directly for your terminal.*
 
+[![PyPI](https://img.shields.io/pypi/v/tyrion-cli.svg)](https://pypi.org/project/tyrion-cli/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![Textual](https://img.shields.io/badge/built%20with-Textual-teal.svg)](https://textual.textualize.io/)
 [![Tests: 200 passed](https://img.shields.io/badge/tests-200%20passed-success.svg)](#testing)
@@ -25,7 +26,9 @@ curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh |
 
 Then just run `tyrion`. The `&& exec "$SHELL" -l` at the end restarts your shell so `tyrion` works right away in this same terminal window. (In scripts and CI, leave that part off: there is no shell to restart.) The script installs [`uv`](https://docs.astral.sh/uv/) if you don't have it, then installs Tyrion into its own isolated environment. You don't need Python installed (uv fetches Python 3.12 for you), and it never uses `sudo`. Want to read it first? [`install.sh`](install.sh) is short.
 
-- **Update:** run the install command again.
+- **Other ways to install:** `uv tool install tyrion-cli` if you already use [uv](https://docs.astral.sh/uv/), or `pipx install tyrion-cli` (needs Python 3.12 or newer). The package is on [PyPI](https://pypi.org/project/tyrion-cli/).
+- **Install a specific version:** `curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh | TYRION_VERSION=0.1.0 sh && exec "$SHELL" -l`
+- **Update:** `uv tool upgrade tyrion-cli` (or run the install command again).
 - **Uninstall:** `uv tool uninstall tyrion-cli` (your chats and settings in `~/.tyrion` are left alone; delete that folder to remove them too).
 - **`command not found: tyrion`?** The terminal window you installed from can't see the new command yet (this happens if the command was run without the `&& exec "$SHELL" -l` part). Run `exec "$SHELL" -l`, or open a new terminal window, or run `export PATH="$HOME/.local/bin:$PATH"` and try again. The installer prints these for you at the end.
 
