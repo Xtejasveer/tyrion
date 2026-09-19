@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.widgets import TextArea
 
 from tyrion_agent.events import (
     MessageEndEvent,
@@ -160,6 +162,19 @@ class TyrionApp(App[None]):
         else:
             self.screen.remove_class("chat-active")
             self.remove_class("chat-active")
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Keep the newest messages in view while the command list opens and closes.
+
+        The list takes room from the transcript, which would otherwise hide the
+        bottom of it. Only a transcript already at the bottom is moved.
+        """
+        try:
+            transcript = self.query_one("#transcript-container", VerticalScroll)
+        except NoMatches:
+            return
+        if transcript.scroll_y >= transcript.max_scroll_y - 1:
+            self.call_after_refresh(transcript.scroll_end, animate=False)
 
     def on_mount(self) -> None:
         """Actions to run when screen mounts."""

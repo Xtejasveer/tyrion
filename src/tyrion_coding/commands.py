@@ -27,6 +27,11 @@ class CommandRegistry:
     def get(self, name: str) -> SlashCommand | None:
         return self._commands.get(name)
 
+    def matching(self, prefix: str) -> list[SlashCommand]:
+        """Commands whose name starts with `prefix`, in registration order."""
+        prefix = prefix.lower()
+        return [cmd for cmd in self._commands.values() if cmd.name.startswith(prefix)]
+
     @property
     def commands(self) -> list[SlashCommand]:
         return list(self._commands.values())
