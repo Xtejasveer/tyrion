@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _package_version
+
 import typer
 
 from tyrion_coding.provider_config import get_provider_for_model
@@ -13,7 +16,20 @@ from tyrion_coding.session import CodingSession
 from tyrion_coding.session_coding import SessionManager
 
 app = typer.Typer(add_completion=False)
-VERSION = "0.1.0"
+
+
+def _installed_version() -> str:
+    """The version from the installed package's metadata.
+
+    pyproject.toml is the one place the version is written down; this reads it back.
+    """
+    try:
+        return _package_version("tyrion-cli")
+    except PackageNotFoundError:
+        return "0+unknown"  # running from a source tree that was never installed
+
+
+VERSION = _installed_version()
 SYSTEM_PROMPT = """You are tyrion, a terminal-based coding agent.
 You help users by reading, writing, and editing files and running shell commands.
 

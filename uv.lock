@@ -299,18 +299,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytest-aio"
-version = "2.1.7"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pytest" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/38/9aab892a064592dde69b68554550a7f773d9120d5cbd77c9c033a91bba71/pytest_aio-2.1.7.tar.gz", hash = "sha256:c9c2fa05787a48cc6abf90f57d2333dc4fe356a1b49db7bcb52ec32ada8bb684", size = 5509, upload-time = "2026-02-12T15:58:50.899Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/39/a9a065eaf0336041225443e79ecbaa27146c241514782990480a70df0ac0/pytest_aio-2.1.7-py3-none-any.whl", hash = "sha256:72eca30834d254d3f36336295a19119b42900c84bdd8155a0c242467987d0e73", size = 6577, upload-time = "2026-02-12T15:58:51.524Z" },
-]
-
-[[package]]
 name = "pytest-asyncio"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -424,7 +412,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tyrion"
+name = "tyrion-cli"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -432,13 +420,16 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pygments" },
-    { name = "pytest" },
-    { name = "pytest-aio" },
-    { name = "pytest-asyncio" },
     { name = "rich" },
-    { name = "ruff" },
     { name = "textual" },
     { name = "typer" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -447,13 +438,16 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pygments", specifier = ">=2.18" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-aio", specifier = ">=2.1.7" },
-    { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "ruff", specifier = ">=0.5" },
     { name = "textual", specifier = ">=8.0" },
     { name = "typer", specifier = ">=0.12" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "ruff", specifier = ">=0.5" },
 ]
 
 [[package]]

@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from inspect import isawaitable
-from typing import Literal
 
 from tyrion_agent.events import AgentEvent, MessageEndEvent, MessageStartEvent
 from tyrion_agent.loop import run_agent_loop

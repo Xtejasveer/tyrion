@@ -2,16 +2,31 @@
 
 <div align="center">
 
-![Tyrion Terminal](assets/welcome.png)
+![Tyrion Terminal](https://raw.githubusercontent.com/Xtejasveer/tyrion/main/assets/welcome.png)
 
 *A powerful, transparent, and responsive AI coding companion built directly for your terminal.*
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![Textual](https://img.shields.io/badge/built%20with-Textual-teal.svg)](https://textual.textualize.io/)
 [![Tests: 200 passed](https://img.shields.io/badge/tests-200%20passed-success.svg)](#testing)
 [![Architecture: Pi-derived](https://img.shields.io/badge/architecture-Pi--derived-gold.svg)](#architecture)
 
 </div>
+
+---
+
+## 📦 Install
+
+Works on **macOS and Linux**. On Windows, use [WSL](https://learn.microsoft.com/windows/wsl/install).
+
+```bash
+curl -LsSf https://raw.githubusercontent.com/Xtejasveer/tyrion/main/install.sh | sh
+```
+
+Then run `tyrion` to start. The script installs [`uv`](https://docs.astral.sh/uv/) if you don't have it, then installs Tyrion into its own isolated environment. You don't need Python installed (uv fetches Python 3.12 for you), and it never uses `sudo`. Want to read it first? [`install.sh`](install.sh) is short.
+
+- **Update:** run the install command again.
+- **Uninstall:** `uv tool uninstall tyrion-cli` (your chats and settings in `~/.tyrion` are left alone; delete that folder to remove them too).
 
 ---
 
@@ -92,26 +107,39 @@ Tyrion's core engine architecture is derived from the **Pi coding agent architec
   - `write`: Creates or replaces files safely.
   - `edit`: Precise substring replacements with uniqueness validation.
   - `bash`: Subprocess execution with process group termination (`os.killpg`) to eliminate orphan background processes.
-- 🔌 **In-UI Connection (`/connect`)**: Connect your OpenRouter or OpenAI API keys directly within the app and have them securely persisted in `~/.tyrion/credentials.json`.
+- 🔌 **In-UI Connection (`/connect`)**: Connect your OpenRouter or OpenAI API keys directly within the app and have them saved in `~/.tyrion/credentials.json` (readable only by you).
 - 📊 **Real-Time Token Usage Bar**: Dynamic status bar with visual block gauges (`▰▰▰▱▱▱`) displaying exact server-reported token usage against context limits.
 - 🧹 **Automatic & Manual Compaction (`/compact`)**: Compresses long conversations into persistent summaries, preserving immediate context while keeping token usage lean.
 - 🗂️ **Session Resuming (`/resume`)**: Visual session picker overlay allowing you to jump between past conversations and pick up right where you left off.
 
 ---
 
+## 🛡️ Safety
+
+Tyrion is early software (v0.1). Read this before pointing it at a project you care about:
+
+- **It runs commands and edits files without asking.** The `bash`, `write` and `edit` tools act immediately and can reach any path your user can. Use it inside a git repository so you can review and undo changes (`git diff`, `git restore`).
+- **Your code leaves your machine.** Your prompts and the files Tyrion reads are sent to the model provider you connect.
+- **Your API key is stored in plain text** in `~/.tyrion/credentials.json`, readable only by you (permissions `600`). Prefer a key with a spending limit.
+- **Files can carry instructions.** In an untrusted repository, a malicious file could try to steer the model into running commands.
+
+---
+
 ## 🚀 Getting Started
+
+> Just want to use Tyrion? See [Install](#-install) above. This section is for running it from source.
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
 
-### Installation
+### Installation from source
 
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/tyrion.git
+git clone https://github.com/Xtejasveer/tyrion.git
 cd tyrion
 uv sync
 ```
@@ -140,8 +168,11 @@ uv run tyrion --model google/gemini-2.5-flash "Write unit tests for tools.py"
 # Resume an existing session by ID
 uv run tyrion --resume <session_id>
 
-# Pipe content into Tyrion
-cat error.log | uv run tyrion "What is causing this traceback?"
+# Include a file's contents in the prompt
+uv run tyrion "What is causing this traceback? $(cat error.log)"
+
+# Or pipe the whole prompt in
+cat prompt.txt | uv run tyrion
 ```
 
 ---

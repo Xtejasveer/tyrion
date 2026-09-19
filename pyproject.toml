@@ -1,34 +1,74 @@
 [build-system]
-requires = ["hatchling>=1.26"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
-
 [project]
-name = "tyrion"
+# "tyrion" is already taken on PyPI, so the package is published as "tyrion-cli".
+# The command you type is still `tyrion` (see [project.scripts]).
+name = "tyrion-cli"
 version = "0.1.0"
-description = "Add your description here"
+description = "A terminal-native AI coding agent: streaming TUI, tool use, resumable sessions, and any OpenAI-compatible model."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Tejasveer Singh Sodhi" }]
+keywords = ["ai", "coding-agent", "llm", "cli", "tui", "terminal", "textual"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
 dependencies = [
     "anyio>=4.0",
     "httpx>=0.27",
     "pydantic>=2.11",
     "pygments>=2.18",
-    "pytest>=8.0",
-    "pytest-aio>=2.1.7",
-    "pytest-asyncio>=1.4.0",
     "rich>=13.0",
-    "ruff>=0.5",
     "textual>=8.0",
     "typer>=0.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Xtejasveer/tyrion"
+Repository = "https://github.com/Xtejasveer/tyrion"
+Issues = "https://github.com/Xtejasveer/tyrion/issues"
+
 [project.scripts]
 tyrion = "tyrion_coding.cli:app"
+
+# Development tools live here, not in the runtime dependencies, so a normal
+# install does not pull in pytest and ruff. `uv sync` installs this group.
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.5",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/tyrion_ai", "src/tyrion_agent", "src/tyrion_coding"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/tyrion_coding/data/system_prompt.md" = "tyrion_coding/data/system_prompt.md"
+
+# Ship only what belongs in a source release (no scratch scripts, screenshots, or caches).
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/README.md", "/LICENSE", "/pyproject.toml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/tyrion_coding/data/system_prompt.md" = "tyrion_coding/data/system_prompt.md"
+# Pin the lint rules to real-bug checks (pyflakes + syntax) so CI does not change
+# behaviour whenever ruff changes its defaults.
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

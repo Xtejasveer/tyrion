@@ -27,15 +27,27 @@ def load_saved_credentials() -> dict[str, str]:
         return {}
 
 
+def _write_private(path: Path, text: str) -> None:
+    """Write `text` to `path` so that only the current user can read it.
+
+    Permissions are set on the open file *before* the secret goes in, so there is
+    no moment when others can read it. A file created loosely by an older
+    version is tightened too.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(text)
+
+
 def save_credential(provider_name: str, api_key: str) -> None:
-    """Save an API key for a provider to disk."""
-    CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    """Save an API key for a provider to disk (readable only by you)."""
+    CREDENTIALS_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     creds = load_saved_credentials()
     creds[provider_name.lower()] = api_key
     try:
-        with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f:
-            json.dump(creds, f, indent=2)
-    except Exception:
+        _write_private(CREDENTIALS_FILE, json.dumps(creds, indent=2))
+    except OSError:
         pass
 
 

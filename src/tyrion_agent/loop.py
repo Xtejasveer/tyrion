@@ -168,7 +168,6 @@ async def _stream_assistant(
     """Strema one model's response and convert provider events to agent events."""
 
     clean = repair_tool_history(messages)
-    clean_messages = list(clean.messages)
 
     source : AsyncIterator[AssistantMessageEvent] = provider.stream_response(
         model = model,

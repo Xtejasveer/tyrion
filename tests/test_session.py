@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import asyncio
 
 from tyrion_agent.messages import AssistantMessage, UserMessage
 from tyrion_agent.sessions.entries import LeafEntry, MessageEntry, SessionInfoEntry

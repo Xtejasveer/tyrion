@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install (fails if uv.lock is out of date)
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check
+      - name: Tests
+        run: uv run pytest -q
+
+  build:
+    name: Build and check the package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build the wheel and source archive
+        run: uv build
+      - name: The wheel has everything it needs
+        run: |
+          unzip -l dist/*.whl > wheel-contents.txt
+          grep -q 'tyrion_coding/data/system_prompt.md' wheel-contents.txt
+          grep -q 'entry_points.txt' wheel-contents.txt
+          grep -q 'licenses/LICENSE' wheel-contents.txt
+      - name: It installs into a clean environment and starts
+        run: |
+          uv venv --python 3.12 .smoke
+          uv pip install --python .smoke/bin/python dist/*.whl
+          .smoke/bin/tyrion --version
+
+  installer:
+    name: install.sh (${{ matrix.image || matrix.os }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            image: ubuntu:24.04
+          - os: ubuntu-latest
+            image: debian:12-slim
+          - os: ubuntu-latest
+            image: python:3.12-slim
+          - os: macos-latest
+    steps:
+      - name: Install curl (the container images are minimal)
+        if: matrix.image
+        run: apt-get update && apt-get install -y curl ca-certificates
+      - uses: actions/checkout@v4
+      - name: Run the installer on this commit
+        run: TYRION_SOURCE="$PWD" sh install.sh
+      - name: The command works
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          tyrion --version
+      - name: Running the installer again works (this is how updating works)
+        run: TYRION_SOURCE="$PWD" sh install.sh

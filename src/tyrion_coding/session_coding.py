@@ -12,7 +12,6 @@ from pathlib import Path
 from tyrion_agent.messages import UserMessage
 from tyrion_agent.sessions.entries import MessageEntry, SessionEntry
 from tyrion_agent.sessions.jsonl import JsonlSessionStorage
-from tyrion_agent.sessions.tree import reconstruct_state
 from tyrion_coding.display import one_line
 
 
