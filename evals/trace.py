@@ -34,6 +34,7 @@ class AgentTrace:
     tool_calls: list[ToolInvocation] = field(default_factory=list)
     assistant_messages: list[str] = field(default_factory=list)
     turn_count: int = 0
+    errors: list[str] = field(default_factory=list)
 
     @property
     def final_output(self) -> str:
@@ -64,6 +65,8 @@ class TraceCollector:
         elif isinstance(event, TurnStartEvent):
             self._trace.turn_count +=1
         elif isinstance(event, MessageEndEvent) and isinstance(event.message, AssistantMessage):
+            if event.message.stop_reason == "error" and event.message.error_message:
+                self._trace.errors.append(event.message.error_message)
             text = event.message.text.strip()
             if text:
                 self._trace.assistant_messages.append(text)
