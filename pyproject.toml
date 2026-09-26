@@ -74,6 +74,10 @@ testpaths = ["tests"]
 # behaviour whenever ruff changes its defaults.
 [tool.ruff]
 target-version = "py312"
+# Eval fixtures are deliberately broken/incomplete code samples (unused imports,
+# NotImplementedError, typos) that the agent is tasked with fixing — not real
+# source, so they are not linted.
+extend-exclude = ["evals/fixtures"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
