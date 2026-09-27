@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # "tyrion" is already taken on PyPI, so the package is published as "tyrion-cli".
 # The command you type is still `tyrion` (see [project.scripts]).
 name = "tyrion-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "A terminal-native AI coding agent: streaming TUI, tool use, resumable sessions, and any OpenAI-compatible model."
 readme = "README.md"
 requires-python = ">=3.12"
