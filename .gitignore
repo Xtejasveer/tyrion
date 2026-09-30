@@ -16,3 +16,6 @@ wheels/
 # macOS
 .DS_Store
 evals/.runs/
+
+#claude 
+.claude
